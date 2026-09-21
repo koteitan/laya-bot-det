@@ -13,13 +13,14 @@ import { LayaAgent } from "./vendor/agent.ts";
 import { LayaTokenizer, type TokenizerConfig, type TokenizerJson } from "./vendor/tokenizer.ts";
 import { OnnxRunner, type OnnxConfig, type Provider } from "./vendor/session.ts";
 import type { AgentConfig } from "./vendor/types.ts";
-import { cachedBytes, downloadModel, fetchJsonCached } from "./download.ts";
+import { cachedBytes, downloadBytes, downloadJson, type Progress } from "./download.ts";
 
 export const MODEL_URL = "https://huggingface.co/mizchi/laya-multilingual-onnx/resolve/main/";
 export const TOKENIZER_BYTES = 34_363_188;
 export const MODEL_BYTES = 646_870_871;
 
-const modelFile = MODEL_URL + "model.onnx";
+const MODEL_FILE = MODEL_URL + "model.onnx";
+const TOKENIZER_FILE = MODEL_URL + "tokenizer/tokenizer.json";
 
 export interface Loaded {
   agent: LayaAgent;
@@ -43,18 +44,25 @@ export async function load(
   let received = 0;
   try {
     onProgress("config", 0, TOKENIZER_BYTES);
+    // The tokenizer is 34 MB and goes through the same resumable path as the
+    // model; the other three configs are a few hundred bytes each and only ride
+    // along because one chunk covers them.
     const [config, onnxConfig, tokenizerJson, tokenizerConfig] = await Promise.all([
-      fetchJsonCached<AgentConfig>(MODEL_URL + "rl_agent_config.json"),
-      fetchJsonCached<OnnxConfig>(MODEL_URL + "onnx_config.json"),
-      fetchJsonCached<TokenizerJson>(MODEL_URL + "tokenizer/tokenizer.json"),
-      fetchJsonCached<TokenizerConfig>(MODEL_URL + "tokenizer/tokenizer_config.json"),
+      downloadJson<AgentConfig>(MODEL_URL + "rl_agent_config.json"),
+      downloadJson<OnnxConfig>(MODEL_URL + "onnx_config.json"),
+      downloadJson<TokenizerJson>(TOKENIZER_FILE, (p: Progress) => {
+        received = p.received;
+        onProgress("config", p.received, p.total);
+      }),
+      downloadJson<TokenizerConfig>(MODEL_URL + "tokenizer/tokenizer_config.json"),
     ]);
     if (onnxConfig.format !== "laya-onnx") {
       throw new Error(`Not a Laya ONNX bundle: ${MODEL_URL}`);
     }
 
     phase = "model";
-    const model = await downloadModel(modelFile, (p) => {
+    received = 0;
+    const model = await downloadBytes(MODEL_FILE, (p: Progress) => {
       received = p.received;
       onProgress("model", p.received, p.total);
     });
@@ -87,7 +95,11 @@ export async function load(
 
 export const hasWebGPU = (): boolean => "gpu" in navigator;
 
-/** How much of the model a previous visit already paid for. */
-export async function cachedProgress(): Promise<number> {
-  return (await cachedBytes(modelFile))?.received ?? 0;
+/** How much of the download a previous visit already paid for, across both big files. */
+export async function cachedProgress(): Promise<{ received: number; total: number }> {
+  const [model, tokenizer] = await Promise.all([
+    cachedBytes(MODEL_FILE),
+    cachedBytes(TOKENIZER_FILE),
+  ]);
+  return { received: model + tokenizer, total: MODEL_BYTES + TOKENIZER_BYTES };
 }

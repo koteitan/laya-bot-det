@@ -31,7 +31,7 @@ const MAX_NOTES_PER_AUTHOR = 30;
 const REBUILD_MS = 1000;
 
 type LayaState =
-  | { kind: "idle"; cached: number }
+  | { kind: "idle"; cached: number; total: number }
   | { kind: "loading"; phase: Phase; received: number; total: number }
   | { kind: "ready"; provider: string; judged: number }
   | { kind: "error"; phase: Phase; received: number; message: string };
@@ -41,7 +41,7 @@ export function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [relays, setRelays] = useState<RelayList | null>(null);
   const [authors, setAuthors] = useState<Author[]>([]);
-  const [laya, setLaya] = useState<LayaState>({ kind: "idle", cached: 0 });
+  const [laya, setLaya] = useState<LayaState>({ kind: "idle", cached: 0, total: MODEL_BYTES + TOKENIZER_BYTES });
   const [noteCount, setNoteCount] = useState(0);
 
   const notesRef = useRef(new Map<string, Note[]>());
@@ -196,8 +196,8 @@ export function App() {
   }, [laya.kind]);
 
   useEffect(() => {
-    void cachedProgress().then((cached: number) =>
-      setLaya((s) => (s.kind === "idle" ? { kind: "idle", cached } : s)),
+    void cachedProgress().then(({ received, total }) =>
+      setLaya((s) => (s.kind === "idle" ? { kind: "idle", cached: received, total } : s)),
     );
   }, []);
 
@@ -308,11 +308,11 @@ function LayaStatus({ state, onStart }: { state: LayaState; onStart: () => void 
     return (
       <p className="laya-status">
         いまは<b>統計のみ</b>で判定中。
-        {state.cached >= MODEL_BYTES
+        {state.cached >= state.total
           ? "Laya はキャッシュ済みなので、ダウンロードなしで使えます。"
           : state.cached > 0
-            ? `Laya は ${MB(state.cached)} / ${MB(MODEL_BYTES)} MB までキャッシュ済み。続きから再開します。`
-            : `Laya を足すには ${MB(MODEL_BYTES + TOKENIZER_BYTES)} MB のダウンロードが要ります（初回だけ）。`}{" "}
+            ? `Laya は ${MB(state.cached)} / ${MB(state.total)} MB までキャッシュ済み。続きから再開します。`
+            : `Laya を足すには ${MB(state.total)} MB のダウンロードが要ります（初回だけ）。`}{" "}
         <button onClick={onStart}>Laya を読み込む</button>
         {!hasWebGPU() ? " ※ WebGPU が無いので WASM で動きます（かなり遅い）" : null}
       </p>

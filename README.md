@@ -25,9 +25,13 @@ Jev と同じ System One 系のオープンウェイトモデル [Laya](https://
 
 **Laya は任意**。開いた直後は決定的な統計だけで動いていて、ダウンロードは 0 バイト。
 モデルを足したくなったら「Laya を読み込む」を押す。**681 MB**
-(`model.onnx` 647 MB + `tokenizer.json` 34 MB) を Hugging Face から取って、
-Cache API に保存する。2 回目以降のアクセスでは再ダウンロードしない。
+(`model.onnx` 647 MB + `tokenizer.json` 34 MB) を Hugging Face から取る。
 推論は WebGPU、無ければ WASM にフォールバックする (かなり遅い)。
+
+取得は **8 MB ずつの Range リクエスト**で、チャンク単位で Cache API に入れる。
+回線が切れても失うのは 1 チャンクだけで、リロードしても続きから再開する
+(`web/src/laya/download.ts`)。647 MB を 1 本のレスポンスで読み切る作りだと、
+313 MB 地点で切れたときに 0 バイトしか残らない。
 
 この作りにしたのは、統計だけで AUC 0.839 出るから (下の表)。
 681 MB 払う前に、何が起きるかは見えている方がいい。
