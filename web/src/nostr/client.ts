@@ -1,4 +1,11 @@
-/** rx-nostr wiring: relay discovery, the kind:1 stream, and kind:0 lookups. */
+/** rx-nostr wiring: relay discovery, the kind:1 stream, and kind:0 lookups.
+ *
+ *  Every request here is built inside its Observable rather than beforehand.
+ *  `RxReq` pushes filters through a plain Subject, so anything emitted before
+ *  something subscribes is dropped on the floor and the relay is never asked --
+ *  measurably: emit-then-subscribe yields 0 events where subscribe-then-emit
+ *  yields the requested 3.
+ */
 
 import { verifier } from "@rx-nostr/crypto";
 import {
@@ -7,11 +14,14 @@ import {
   createRxNostr,
   uniq,
   type EventPacket,
+  type LazyFilter,
 } from "rx-nostr";
 import { Observable, filter, map, merge, scan, share, takeUntil, timer } from "rxjs";
 import { BOOTSTRAP, fallbackRelays } from "./relays.ts";
 
 export const rxNostr = createRxNostr({ verifier });
+
+export type NostrEvent = EventPacket["event"];
 
 export interface RelayList {
   source: "kind:10002" | "kind:3" | "fallback";
@@ -41,82 +51,87 @@ function parseKind3(content: string): string[] {
   }
 }
 
+/** One backward request, subscribed before its filters are emitted. */
+function backward(relays: string[], filters: LazyFilter[]): Observable<NostrEvent> {
+  return new Observable<NostrEvent>((subscriber) => {
+    const req = createRxBackwardReq();
+    const sub = rxNostr
+      .use(req, { on: { relays } })
+      .pipe(uniq(), map((packet) => packet.event))
+      .subscribe(subscriber);
+    for (const f of filters) req.emit(f);
+    req.over();
+    return () => sub.unsubscribe();
+  });
+}
+
 /**
- * Resolve which relays to read someone's notes from.
+ * Resolve which relays to read notes from.
  *
  * kind:10002 decides it when present; kind:3's legacy map is a fallback, never a
- * supplement. Emits as soon as a usable answer exists rather than waiting for
- * every bootstrap relay, and emits again if a newer kind:10002 arrives late.
+ * supplement. The static set is emitted if nothing answers in time, but the
+ * search keeps running, so a late kind:10002 still replaces it.
  */
 export function discoverRelays(pubkey: string, eoseMs = 5000): Observable<RelayList> {
-  const req = createRxBackwardReq();
-  const found = rxNostr.use(req, { on: { relays: BOOTSTRAP } }).pipe(
-    uniq(),
-    map((packet) => packet.event),
-    // Keep whichever event is newest so far, and re-emit when a newer one lands.
-    scan(
-      (best, event) => (event.created_at > (best?.created_at ?? -1) ? event : best),
-      null as null | EventPacket["event"],
-    ),
-    filter((event): event is EventPacket["event"] => event !== null),
-    map((event): RelayList | null => {
-      if (event.kind === 10002) {
-        const read = parse10002(event);
-        return read.length ? { source: "kind:10002", read } : null;
-      }
-      const read = parseKind3(event.content);
-      return read.length ? { source: "kind:3", read } : null;
-    }),
-    filter((list): list is RelayList => list !== null),
-    share(),
-  );
-  // The static set covers the case where nothing answers in time, but the search
-  // keeps running: a kind:10002 that arrives late still replaces it, rather than
-  // the client being stuck on the fallback for the rest of the session.
-  const fallback = timer(eoseMs).pipe(
-    map((): RelayList => ({ source: "fallback", read: fallbackRelays() })),
-    takeUntil(found),
-  );
-  const result = merge(found, fallback);
-  req.emit({ kinds: [10002, 3], authors: [pubkey], limit: 2 });
-  return result;
+  return new Observable<RelayList>((subscriber) => {
+    const req = createRxBackwardReq();
+    const found = rxNostr.use(req, { on: { relays: BOOTSTRAP } }).pipe(
+      uniq(),
+      map((packet) => packet.event),
+      // Keep whichever event is newest so far, and re-emit when a newer one lands.
+      scan(
+        (best, event) => (event.created_at > (best?.created_at ?? -1) ? event : best),
+        null as null | NostrEvent,
+      ),
+      filter((event): event is NostrEvent => event !== null),
+      map((event): RelayList | null => {
+        if (event.kind === 10002) {
+          const read = parse10002(event);
+          return read.length ? { source: "kind:10002", read } : null;
+        }
+        const read = parseKind3(event.content);
+        return read.length ? { source: "kind:3", read } : null;
+      }),
+      filter((list): list is RelayList => list !== null),
+      share(),
+    );
+    const fallback = timer(eoseMs).pipe(
+      map((): RelayList => ({ source: "fallback", read: fallbackRelays() })),
+      takeUntil(found),
+    );
+    const sub = merge(found, fallback).subscribe(subscriber);
+    req.emit({ kinds: [10002, 3], authors: [pubkey], limit: 2 });
+    return () => sub.unsubscribe();
+  });
 }
 
 /** Live kind:1 from the given relays. Forward strategy: new notes only. */
-export function streamNotes(relays: string[]): Observable<EventPacket["event"]> {
-  const req = createRxForwardReq();
-  const notes = rxNostr
-    .use(req, { on: { relays } })
-    .pipe(uniq(), map((packet) => packet.event));
-  req.emit({ kinds: [1], limit: 0 });
-  return notes;
+export function streamNotes(relays: string[]): Observable<NostrEvent> {
+  return new Observable<NostrEvent>((subscriber) => {
+    const req = createRxForwardReq();
+    const sub = rxNostr
+      .use(req, { on: { relays } })
+      .pipe(uniq(), map((packet) => packet.event))
+      .subscribe(subscriber);
+    req.emit({ kinds: [1], limit: 0 });
+    return () => sub.unsubscribe();
+  });
 }
 
 /** One backward pass for recent kind:1, so the page has something to show at once. */
-export function seedNotes(relays: string[], limit = 100): Observable<EventPacket["event"]> {
-  const req = createRxBackwardReq();
-  const notes = rxNostr
-    .use(req, { on: { relays } })
-    .pipe(uniq(), map((packet) => packet.event));
-  req.emit({ kinds: [1], limit });
-  req.over();
-  return notes;
-}
+export const seedNotes = (relays: string[], limit = 100): Observable<NostrEvent> =>
+  backward(relays, [{ kinds: [1], limit }]);
 
 /** Newest kind:0 for each requested pubkey. Relays cap author lists, so batch. */
 export function fetchProfiles(
   relays: string[],
   pubkeys: string[],
   batch = 100,
-): Observable<EventPacket["event"]> {
-  const req = createRxBackwardReq();
-  const events = rxNostr
-    .use(req, { on: { relays } })
-    .pipe(uniq(), map((packet) => packet.event));
+): Observable<NostrEvent> {
+  const filters: LazyFilter[] = [];
   for (let i = 0; i < pubkeys.length; i += batch) {
     const chunk = pubkeys.slice(i, i + batch);
-    req.emit({ kinds: [0], authors: chunk, limit: chunk.length });
+    filters.push({ kinds: [0], authors: chunk, limit: chunk.length });
   }
-  req.over();
-  return events;
+  return backward(relays, filters);
 }
