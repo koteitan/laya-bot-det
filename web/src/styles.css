@@ -102,6 +102,9 @@ main { padding: 14px 16px 40px; display: flex; flex-direction: column; gap: 10px
 .posts { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 7px;
          font-size: 12px; color: var(--dim); }
 .posts div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.boundary { padding: 24px 16px; line-height: 1.8; }
+.boundary h1 { font-size: 18px; color: var(--bot); }
+.boundary a { color: var(--human); }
 footer { padding: 0 16px 28px; color: var(--dim); font-size: 12px; }
 footer a { color: var(--human); }
 @media (max-width: 480px) { .bars { grid-template-columns: 62px 1fr 42px; } }

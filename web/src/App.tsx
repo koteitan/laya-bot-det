@@ -204,7 +204,11 @@ export function App() {
     };
   }, [laya.kind]);
 
-  useEffect(() => {
+  // Deliberately not run on mount. Reading it means opening a Cache bucket that
+  // can hold 681 MB, and on a device whose tab was killed mid-write that is the
+  // one thing most likely to take the page down with it. Nothing here needs the
+  // figure until someone reaches for the button.
+  const checkCache = useCallback(() => {
     void cachedProgress().then(({ received, total }) =>
       setLaya((s) => (s.kind === "idle" ? { kind: "idle", cached: received, total } : s)),
     );
@@ -277,7 +281,10 @@ export function App() {
         <LayaStatus state={laya} onStart={startLaya} onClear={clearLaya} />
         <Menu
           open={menuOpen}
-          onToggle={() => setMenuOpen((v) => !v)}
+          onToggle={() => {
+            if (!menuOpen) checkCache();
+            setMenuOpen((v) => !v);
+          }}
           settings={settings}
           onChange={update}
           onClearCache={() => {

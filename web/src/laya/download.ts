@@ -41,8 +41,20 @@ const chunkKey = (url: string, start: number, end: number): string =>
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const openCache = async (): Promise<Cache | null> =>
-  typeof caches === "undefined" ? null : caches.open(CACHE).catch(() => null);
+/** Opening a cache holding several hundred MB can hang on a device that has
+ *  just had a tab killed mid-write. A hang is not something `.catch` sees, so
+ *  the wait is bounded and a slow open is treated as no cache at all. */
+async function openCache(timeoutMs = 3000): Promise<Cache | null> {
+  if (typeof caches === "undefined") return null;
+  try {
+    return await Promise.race([
+      caches.open(CACHE),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+  } catch {
+    return null;
+  }
+}
 
 async function totalBytes(url: string): Promise<number> {
   // A HEAD would be cheaper, but the CDN redirect chain answers it inconsistently;

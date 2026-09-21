@@ -24,9 +24,11 @@ export interface Author {
 
 function Avatar({ profile }: { profile: Profile | undefined }) {
   const [src, setSrc] = useState<string>("");
+  const [failed, setFailed] = useState(false);
   const url = profile?.picture ?? "";
   useEffect(() => {
     let live = true;
+    setFailed(false);
     if (!url) {
       setSrc("");
       return;
@@ -38,12 +40,18 @@ function Avatar({ profile }: { profile: Profile | undefined }) {
       live = false;
     };
   }, [url]);
-  if (!src) return <div className="avatar" />;
+  // A broken image becomes an empty circle through state, not by swapping the
+  // node out from under React -- replaceWith leaves the tree React thinks it
+  // rendered and the one in the document disagreeing, and the next update throws.
+  if (!src || failed) return <div className="avatar" />;
   return (
-    <img className="avatar" src={src} alt="" loading="lazy" onError={(e) => {
-      // The cached copy or the origin is gone; drop back to an empty circle.
-      e.currentTarget.replaceWith(Object.assign(document.createElement("div"), { className: "avatar" }));
-    }} />
+    <img
+      className="avatar"
+      src={src}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
   );
 }
 
