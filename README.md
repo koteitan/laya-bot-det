@@ -84,17 +84,7 @@ laya: laya-multilingual-onnx on CUDAExecutionProvider   # GPU
 laya: laya-multilingual-onnx on CPUExecutionProvider    # CPU にフォールバック
 ```
 
-RTX 4060 Ti (8GB) での実測 (343 authors、1人あたり5問を1バッチ):
-
-| | author/s | typed decision/s | 343人の所要 |
-|---|---|---|---|
-| CPU (i7-14700F, 28コア) | 0.6 | 3 | 約9分 |
-| **CUDA** | **23.9** | **約120** | **14秒** |
-
-約39倍。投稿数の多い author から処理するので、末尾の軽い author では
-50 author/s (250 decision/s) 前後まで上がる。
-
-CPU と書かれていて GPU を使いたい場合:
+速度は「速度」の節を見ること。CPU と書かれていて GPU を使いたい場合:
 
 ```bash
 .venv/bin/pip uninstall -y onnxruntime          # CPU 版が入っていると競合する
@@ -161,22 +151,35 @@ nostr には正解ラベルがある。kind:0 の NIP-24 `"bot": true` — ア�
 だから UI は合成スコアだけでなく、Laya と統計を**別々に並べて**表示する。
 どちらが効いているかが見えるように。
 
-## 正直に言っておくこと
+## 速度
 
-- **スコアは較正されていない。** この checkpoint は `temperature = [1,1,1]`、
-  `temperature_by_options = {}` を積んでいる。つまり Laya が宣伝する較正処理は
-  ここでは恒等関数。**P(bot) = 0.6 は「6割当たる」という意味ではない。**
-  順位には意味があるが、絶対値にはない。
-- **ラベルが39件しかない** (うち negative は8件)。合成の重み 0.5 としきい値 0.4 は
-  その同じ39件で決めた。hold-out はない。数字は楽観的に出ている。
-- **ラベルは片側だけ。** 自己申告なので、申告した bot は分かるが、
-  申告していない bot は human と区別がつかない。
-- **しきい値の既定は 0.63。** `eval` が出す「平衡精度が最大になる点」は 0.40 前後だが、
-  ラベル集合が bot に偏っている (31:8) ため、実際の集団には低すぎた。
-  0.40 では 343人中 192人 (56%) が bot 判定になる。0.63 なら 45人 (13%) で、
-  こちらのほうが現実的。**ラベル集合の最適値は集団の最適値ではない。**
-  メニューのスライダーで動かせる。
-- `category` は当てにならない。スコア 0.003 の human にも `spam` が付く。
+RTX 4060 Ti (8GB) と i7-14700F (28コア) での実測。1 author = 5問を1バッチ。
+
+| | author/s | typed decision/s | 343 authors の所要 |
+|---|---|---|---|
+| CPU | 0.6 | 3 | 約9分 |
+| **CUDA** | **23.9** | **約120** | **14秒** |
+
+約39倍。`./bot-det all` の実行例:
+
+```
+collected 5080 unique kind:1 events
+5080 notes (5080 new to the cache) from 717 authors
+profiles: 290 cached, 53 to fetch
+pictures: 67/67
+judging 343 authors (374 skipped for having under 2 posts)
+laya: laya-multilingual-onnx on CUDAExecutionProvider
+judged  20/343 (11.4/s)
+judged 100/343 (13.2/s)
+judged 200/343 (17.5/s)
+judged 300/343 (22.2/s)
+judged 343/343 (23.9/s)
+```
+
+表示は累積平均。投稿数の多い author から処理するので、最初は系列が長くて遅く、
+末尾の軽い author では瞬間値で 50 author/s (約 250 decision/s) 前後まで上がる。
+
+自分の環境で測るなら `./bot-det bench`。
 
 ## ファイル
 
