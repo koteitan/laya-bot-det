@@ -380,7 +380,10 @@ function LayaStatus({
   if (state.kind === "idle") {
     return (
       <p className="laya-status">
-        {warning ? (
+        {/* The warning is a measurement of the default bundle. Pointing at
+            another one is precisely how you find out whether it still holds,
+            so do not repeat it back at someone already doing that. */}
+        {warning && !usingCustomModel() ? (
           <span className={warning.fatal ? "warn fatal" : "warn"}>{warning.text}</span>
         ) : null}
         {usingCustomModel() ? <span className="warn">モデル: {MODEL_URL}</span> : null}
