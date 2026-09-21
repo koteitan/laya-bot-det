@@ -146,7 +146,9 @@ async function tryOrt(provider) {
     var ort = await import(ORT_URL);
     log("読み込み OK  version=" + (ort.env && ort.env.versions ? ort.env.versions.web : "?"));
     // このページと同じ配置のファイルを使う
-    ort.env.wasm.wasmPaths = location.pathname.replace(/[^/]*$/, "") + "ort/";
+    // Absolute: onnxruntime is imported from a CDN here, and a relative path
+    // can resolve against that origin instead of this one.
+    ort.env.wasm.wasmPaths = location.origin + location.pathname.replace(/[^/]*$/, "") + "ort/";
     ort.env.wasm.numThreads = 1;
     log("wasmPaths=" + ort.env.wasm.wasmPaths + " numThreads=1");
     var res = await fetch("tiny.onnx");

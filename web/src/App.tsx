@@ -19,6 +19,7 @@ import { features, heuristicScore, type Note } from "./detect/features.ts";
 import { buildState, combinedScore, QUESTIONS } from "./detect/questions.ts";
 import { memoryWarning } from "./laya/capability.ts";
 import { clearTrace, crashed, format, mark, trace } from "./laya/trace.ts";
+import { ortVersion, selfTest, type SelfTestResult } from "./laya/selftest.ts";
 import {
   cachedProgress,
   clearModelCache,
@@ -56,6 +57,9 @@ export function App() {
   // A run that never reached "done" left its marks behind; show them, since the
   // crash took the console with it.
   const [showTrace, setShowTrace] = useState(() => crashed());
+  // `?diag` exercises onnxruntime on a 106-byte model through this same bundle.
+  const [diag, setDiag] = useState<SelfTestResult[] | "running" | null>(null);
+  const showDiag = new URLSearchParams(location.search).has("diag");
 
   const notesRef = useRef(new Map<string, Note[]>());
   const judgedRef = useRef(new Map<string, { at: number; verdict: LayaVerdict }>());
@@ -301,6 +305,29 @@ export function App() {
           cachedProfiles={cachedProfileCount()}
         />
       </header>
+      {showDiag ? (
+        <pre className="trace diag">
+          {`onnxruntime-web ${ortVersion()} を 106 バイトのモデルで試します\n\n`}
+          {diag === "running"
+            ? "実行中…"
+            : diag
+              ? diag.map((r) => `${r.provider}: ${r.ok ? "OK" : "失敗"} (${r.ms}ms)\n  ${r.detail}`).join("\n")
+              : "未実行"}
+          {"\n\n"}
+          <button
+            onClick={() => {
+              setDiag("running");
+              void (async () => {
+                const out: SelfTestResult[] = [];
+                for (const p of ["wasm", "webgpu"] as const) out.push(await selfTest(p));
+                setDiag(out);
+              })();
+            }}
+          >
+            診断する
+          </button>
+        </pre>
+      ) : null}
       {showTrace ? (
         <pre className="trace">
           {"前回の読み込みは最後まで到達していません。ここで止まりました:\n\n"}
