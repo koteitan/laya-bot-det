@@ -1,9 +1,24 @@
+import { execSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin } from "vite";
 import { viteStaticCopy } from "vite-plugin-static-copy";
 
 // GitHub Pages serves this project under /laya-bot-det/.
 const base = process.env.VITE_BASE ?? "/laya-bot-det/";
+
+const version = (JSON.parse(readFileSync("package.json", "utf8")) as { version: string }).version;
+
+/** The commit the page was built from, so a deployed page can be told apart from
+ *  the one before it. Actions sets GITHUB_SHA; locally this asks git. */
+function commit(): string {
+  if (process.env.GITHUB_SHA) return process.env.GITHUB_SHA.slice(0, 7);
+  try {
+    return execSync("git rev-parse --short HEAD", { encoding: "utf8" }).trim();
+  } catch {
+    return "unknown";
+  }
+}
 
 // Only the two execution providers `src/laya/load.ts` asks for: jsep backs webgpu,
 // the plain build backs wasm. The asyncify and jspi builds are another 44 MB that
@@ -52,5 +67,9 @@ export default defineConfig({
     }),
     dropOrtWasmFallbackAssets(),
   ],
+  define: {
+    __APP_VERSION__: JSON.stringify(version),
+    __APP_COMMIT__: JSON.stringify(commit()),
+  },
   build: { target: "es2022", outDir: "dist", chunkSizeWarningLimit: 1200 },
 });

@@ -245,7 +245,16 @@ export function App() {
   return (
     <>
       <header>
-        <h1>laya-bot-det</h1>
+        <h1>
+          laya-bot-det{" "}
+          <a
+            className="version"
+            href={`https://github.com/koteitan/laya-bot-det/commit/${__APP_COMMIT__}`}
+            title="このページがビルドされたコミット"
+          >
+            v{__APP_VERSION__}+{__APP_COMMIT__}
+          </a>
+        </h1>
         <p className="summary">
           {relays === null
             ? "リレーを探しています…"
