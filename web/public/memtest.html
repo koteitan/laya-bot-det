@@ -37,6 +37,13 @@ Laya (int8) を動かすには <b>約 800 MB</b>、fp16 なら <b>約 1.3 GB</b>
 <p class="dim">タブが落ちたら、それが上限です。落ちても記録は残るので、
 <b>開き直してこのページに戻ってきてください</b>。上に最大値が出ます。</p>
 
+<div class="box">
+  <div class="dim">WebGPU がこの端末で何を許しているか</div>
+  <div id="gpu" class="dim">調べています…</div>
+  <p><button id="gpubuf">GPU バッファを確保してみる</button></p>
+  <div id="gpulog" class="dim"></div>
+</div>
+
 <div id="log"></div>
 
 <script>
@@ -98,6 +105,76 @@ document.getElementById("run").onclick = function () {
 };
 
 show();
+
+// ---- WebGPU ----
+// JS のバッファが 2 GB 取れても、モデルを載せるのは GPU 側のバッファ。
+// iOS の maxBufferSize は桁違いに小さいことがあり、超えるとエラーではなく
+// タブごと落ちることがある。数字を見ないと切り分けられない。
+var gpuEl = document.getElementById("gpu");
+var gpuLog = document.getElementById("gpulog");
+var adapter = null;
+
+(async function () {
+  if (!navigator.gpu) {
+    gpuEl.innerHTML = '<span class="bad">navigator.gpu がありません（WebGPU 無効）</span>';
+    return;
+  }
+  try {
+    adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) { gpuEl.innerHTML = '<span class="bad">アダプタを取得できません</span>'; return; }
+    var L = adapter.limits;
+    var rows = [
+      ["maxBufferSize", L.maxBufferSize],
+      ["maxStorageBufferBindingSize", L.maxStorageBufferBindingSize],
+      ["maxUniformBufferBindingSize", L.maxUniformBufferBindingSize],
+    ];
+    var html = "";
+    for (var i = 0; i < rows.length; i++) {
+      var mb = rows[i][1] / 1048576;
+      html += rows[i][0] + ": <b>" + (mb >= 1 ? mb.toFixed(0) + " MB" : rows[i][1] + " B") + "</b><br>";
+    }
+    // モデルの重みは 1 本の大きなバッファに載るとは限らないが、上限が
+    // モデルサイズを大きく下回るなら、そこが壁である可能性が高い。
+    var fits325 = L.maxBufferSize >= 325 * 1048576;
+    var fits647 = L.maxBufferSize >= 647 * 1048576;
+    html += '<span class="' + (fits325 ? "ok" : "bad") + '">int8 325MB: ' + (fits325 ? "1本に収まる" : "1本には収まらない") + "</span> ・ ";
+    html += '<span class="' + (fits647 ? "ok" : "bad") + '">fp16 647MB: ' + (fits647 ? "1本に収まる" : "1本には収まらない") + "</span>";
+    gpuEl.innerHTML = html;
+  } catch (e) {
+    gpuEl.innerHTML = '<span class="bad">' + e + "</span>";
+  }
+})();
+
+document.getElementById("gpubuf").onclick = async function () {
+  this.disabled = true;
+  gpuLog.textContent = "";
+  if (!adapter) { gpuLog.textContent = "アダプタがありません"; return; }
+  var device;
+  try {
+    device = await adapter.requestDevice({
+      requiredLimits: { maxBufferSize: adapter.limits.maxBufferSize,
+                        maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize },
+    });
+  } catch (e) { gpuLog.textContent = "device を取れません: " + e; return; }
+  device.addEventListener &&
+    device.addEventListener("uncapturederror", function (ev) { gpuLog.textContent += "\nGPU error: " + ev.error; });
+  var held = [], total = 0;
+  var sizes = [64, 128, 256, 512, 1024];
+  for (var i = 0; i < sizes.length; i++) {
+    var want = sizes[i] * 1048576;
+    if (want > adapter.limits.maxBufferSize) { gpuLog.textContent += sizes[i] + " MB: 上限超え（試さない）\n"; continue; }
+    try {
+      held.push(device.createBuffer({ size: want, usage: GPUBufferUsage.STORAGE }));
+      total += want;
+      gpuLog.textContent += sizes[i] + " MB OK（累計 " + Math.round(total / 1048576) + " MB）\n";
+    } catch (e) {
+      gpuLog.textContent += sizes[i] + " MB 失敗: " + e.name + "\n";
+      break;
+    }
+    await new Promise(function (r) { setTimeout(r, 80); });
+  }
+  gpuLog.textContent += "終了";
+};
 </script>
 </body>
 </html>

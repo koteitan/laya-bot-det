@@ -79,8 +79,15 @@ export async function load(
 
     phase = "session";
     onProgress("session", MODEL_BYTES, MODEL_BYTES);
+    // `?provider=wasm` forces the CPU backend. WebGPU is the default because it
+    // is far faster, but it is also where this fails on some devices, and the
+    // failure takes the tab with it rather than returning an error to catch --
+    // so the choice has to be reachable from outside the code.
+    const forced = new URLSearchParams(location.search).get("provider");
+    const providers: Provider[] =
+      forced === "wasm" ? ["wasm"] : forced === "webgpu" ? ["webgpu"] : ["webgpu", "wasm"];
     const runner = await OnnxRunner.create(model, {
-      providers: ["webgpu", "wasm"],
+      providers,
       // onnxruntime-web fetches these at runtime; vite.config.ts copies them to dist/ort/.
       wasmPaths: `${import.meta.env.BASE_URL}ort/`,
     });
