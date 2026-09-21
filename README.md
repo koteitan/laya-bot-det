@@ -50,6 +50,21 @@ npm run build      # dist/ が出る。ローカルで見るならこれを配�
 npm run dev        # vite の開発サーバ
 ```
 
+### 移植が正しいかの確認
+
+ブラウザ用 TypeScript が `pipeline/` の Python と同じ答えを返すかを、実物の
+モデルで確かめられる。onnxruntime-web の wasm は Node でも動くので、
+トークナイザ・プロンプト構築・バッチ・較正・質問設計まで**ページと同じコード**が
+走る。違うのはバイト列の出どころだけ (ranged `fetch` ではなく `fs`)。
+
+```bash
+cd web
+npx tsx scripts/verify-parity.ts      # state を組み立てて自分で判定し、parity.json に書く
+../.venv/bin/python scripts/verify_parity.py   # 同じ state を Python で判定して突き合わせる
+```
+
+実測で最大差 **0.00045** (fp16 の丸め)。これで未確認なのは WebGPU と DOM だけになる。
+
 `main` に push すると GitHub Actions が `web/dist` を Pages に出す
 (`.github/workflows/pages.yml`)。
 
