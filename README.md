@@ -1,0 +1,201 @@
+# laya-bot-det
+
+nostr の kind:1 を集めて、投稿者ごとに bot かどうかを判定する。
+
+判定は2つのスコアの合成:
+
+- **Laya** — [`mizchi/laya-multilingual-onnx`](https://huggingface.co/mizchi/laya-multilingual-onnx)
+  (mmBERT-base 322M の typed decision モデル)。文章を読んで human / bot を選ぶ。
+- **統計** — 投稿間隔の規則性、テンプレ率、返信率など、決定的に計算できる指標。
+
+## セットアップ
+
+```bash
+git clone git@github.com:koteitan/laya-bot-det.git
+cd laya-bot-det
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+./bot-det model            # ONNX バンドル 650MB を1回だけ取得
+```
+
+## コマンド
+
+段階ごとに分かれていて、それぞれ `data/` に結果を書く。前の段階をやり直さずに再実行できる。
+
+| コマンド | やること | 出力 |
+|---|---|---|
+| `./bot-det model` | Laya の ONNX を取得 (650MB, 初回のみ) | `models/` |
+| `./bot-det relays` | (1) 自分の kind:10002 からリレー一覧を取る | `data/relays.json` |
+| `./bot-det collect` | (2) そのリレーから kind:1 を 100件 × 10試行 | `data/cache/notes/` |
+| `./bot-det snapshots` | 収集済みスナップショットの一覧 | |
+| `./bot-det profiles` | (4) kind:0 と picture をキャッシュ | `data/cache/` |
+| `./bot-det detect` | (3) author ごとに Laya で判定 | `data/authors.json` |
+| `./bot-det eval` | kind:0 の `bot:true` を正解として精度を測る | `data/eval.json` |
+| `./bot-det bench` | CPU と CUDA の速度を実データで比較 | |
+| `./bot-det all` | 上を順に全部 | |
+
+よく使うオプション:
+
+```bash
+./bot-det relays --npub npub1...        # 別の人のリレーリストを使う
+./bot-det collect --trials 20 --limit 100
+./bot-det detect --min-posts 3          # 投稿が少ない author を除く
+./bot-det profiles --no-pictures        # 画像を落とさない
+./bot-det -v collect                    # どのリレーが失敗したか出す
+```
+
+## kind:1 のキャッシュと再検証
+
+収集した kind:1 は2つに分けて保存する。
+
+- `data/cache/notes/notes.jsonl` — これまでに集めた全イベント。id で重複を排除して**追記のみ**。
+- `data/cache/notes/snapshots/<id>.json` — その1回の `collect` が見た event id の一覧と、
+  使ったリレー・試行回数。
+
+分けてあるので、**キャッシュが増えても過去の実行をそのまま再現できる**。
+
+```bash
+./bot-det snapshots                          # 一覧
+./bot-det detect --snapshot 20260921-110026  # その回と完全に同じイベントで再判定
+./bot-det detect --snapshot latest           # 直近 (既定)
+./bot-det detect --snapshot all              # キャッシュ全部
+./bot-det eval  --snapshot 20260921-110026   # 同じ集合で精度を測り直す
+```
+
+判定ロジックを変えたとき、`--snapshot` を固定すれば**ネットワークに出ずに**、
+同じ入力で前後を比較できる。`data/authors.json` にも使った snapshot id が入る。
+
+`--snapshot` は `profiles` / `detect` / `eval` / `bench` で使える。
+
+結果は `index.html` で見る。`data/authors.json` を `fetch` する静的ページなので、
+**`file://` では開けない** (CORS で fetch が失敗して真っ白になる)。
+HTTP で配信すること — live-server でも、リポジトリを置いたローカルサーバでもよい。
+
+## GPU
+
+`requirements.txt` は x86_64 では `onnxruntime-gpu` を入れる。CUDA 12 と cuDNN 9 の
+共有ライブラリは `nvidia-*-cu12` の pip パッケージ (torch を入れると一緒に来る) にあれば
+そのまま使う。起動時のログで確認できる:
+
+```
+laya: laya-multilingual-onnx on CUDAExecutionProvider   # GPU
+laya: laya-multilingual-onnx on CPUExecutionProvider    # CPU にフォールバック
+```
+
+RTX 4060 Ti (8GB) での実測 (343 authors、1人あたり5問を1バッチ):
+
+| | author/s | typed decision/s | 343人の所要 |
+|---|---|---|---|
+| CPU (i7-14700F, 28コア) | 0.6 | 3 | 約9分 |
+| **CUDA** | **23.9** | **約120** | **14秒** |
+
+約39倍。投稿数の多い author から処理するので、末尾の軽い author では
+50 author/s (250 decision/s) 前後まで上がる。
+
+CPU と書かれていて GPU を使いたい場合:
+
+```bash
+.venv/bin/pip uninstall -y onnxruntime          # CPU 版が入っていると競合する
+.venv/bin/pip install onnxruntime-gpu
+./bot-det bench                                  # 実データで速度を比較
+```
+
+`onnxruntime` 自身の `preload_dlls()` は自分の site-packages しか見ないため、
+CUDA ライブラリが user site (`~/.local/lib/.../nvidia/`) にあると
+`libcublasLt.so.12: cannot open shared object file` で CPU に落ちる。
+`pipeline/laya.py` の `preload_cuda()` がそれを先回りして ctypes で読み込む。
+
+## Laya に何を渡しているか
+
+state は kind:0 のプロフィールと、重複を除いた新しい投稿12件 (各140文字まで)。
+
+```
+display_name: じほう
+about: Current time in Japan / 30分ごとに時間教えてくれます
+posts:
+- 2026年9月21日 12時00分
+- 2026年9月21日 12時30分
+- ...
+```
+
+質問は1回の forward pass にまとめて5つ:
+
+| 名前 | 型 | 中身 |
+|---|---|---|
+| `bot_hb` | choice | `{human: "a human", bot: "an automated bot"}` |
+| `bot_bh` | choice | 同じ質問、**選択肢の順番を逆**にしたもの |
+| `category` | choice | person / news / data / bridge / spam / art |
+| `templated` | noul | 毎回同じテンプレートか |
+| `conversational` | noul | 他人に話しかけているか |
+
+`bot_hb` と `bot_bh` の平均が Laya のスコア。順番で答えが変わるので両方聞いている。
+
+## 設計は測って決めた
+
+nostr には正解ラベルがある。kind:0 の NIP-24 `"bot": true` — アカウント自身の申告。
+4,352 notes のサンプルで **bot:true 31件 / bot:false 8件**。これに対する AUC:
+
+| 変えたもの | AUC |
+|---|---|
+| noul「これは bot の投稿だ」 | 0.52 |
+| choice `{human, bot}` | 0.67 |
+| state = 投稿12件 | 0.669 |
+| state = 投稿5件 | 0.645 |
+| state = kind:0 プロフィールのみ | 0.790 |
+| **state = プロフィール + 投稿** | **0.819** |
+| criteria を1文の説明にする | **0.383** (偶然以下) |
+| criteria を短いラベル2語にする | **0.819** |
+| **統計のみ (Laya を使わない)** | **0.839** |
+| **Laya × 0.5 + 統計 × 0.5** | **0.907** |
+
+読み取れること:
+
+1. **凝った criteria を書くと悪化する。** 1文の説明を入れた版は AUC 0.383 で、
+   偶然より悪い。`"a human"` / `"an automated bot"` の2語が最も良かった。
+2. **決定的な統計だけで AUC 0.839。** Laya 単独 (0.819) より上。
+   投稿間隔の規則性とテンプレ率を数えるほうが、文章を読むより効く。
+3. **合成すると 0.907。** Laya が意味を持つのはここだけ。単独では算術に負ける。
+
+だから UI は合成スコアだけでなく、Laya と統計を**別々に並べて**表示する。
+どちらが効いているかが見えるように。
+
+## 正直に言っておくこと
+
+- **スコアは較正されていない。** この checkpoint は `temperature = [1,1,1]`、
+  `temperature_by_options = {}` を積んでいる。つまり Laya が宣伝する較正処理は
+  ここでは恒等関数。**P(bot) = 0.6 は「6割当たる」という意味ではない。**
+  順位には意味があるが、絶対値にはない。
+- **ラベルが39件しかない** (うち negative は8件)。合成の重み 0.5 としきい値 0.4 は
+  その同じ39件で決めた。hold-out はない。数字は楽観的に出ている。
+- **ラベルは片側だけ。** 自己申告なので、申告した bot は分かるが、
+  申告していない bot は human と区別がつかない。
+- **しきい値 0.4 だと 332人中 169人 (51%) が bot 判定になる。**
+  これは実際の bot 率としては高すぎる。ラベル集合が bot に偏っている
+  (31:8) のが原因。メニューのスライダーで動かせるようにしてあるので、
+  用途に応じて上げること。
+- `category` は当てにならない。スコア 0.003 の human にも `spam` が付く。
+
+## ファイル
+
+```
+bot-det              コマンド本体 (.venv の python を呼ぶだけ)
+pipeline/
+  nip19.py           bech32 (npub <-> hex)。ライブラリは使わず自前
+  relaypool.py       WebSocket で REQ を投げて EOSE まで集める
+  relays.py          kind:10002 -> kind:3 -> フォールバック の順で解決
+  collect.py         kind:1 のページング収集、kind:0 と画像のキャッシュ
+  features.py        決定的な統計と、その素朴なスコア
+  laya.py            ONNX 推論。プロンプト構築と較正を上流から移植
+  detect.py          Laya に何をどう聞くか (上の表の結論)
+  evaluate.py        NIP-24 ラベルに対する AUC / しきい値
+  run.py             CLI
+index.html main.js style.css   結果表示 (ビルド不要)
+data/                生成物。cache/pictures だけ .gitignore
+```
+
+`data/cache/pictures/` は 30MB 前後になるので git には入れない。
+画像が無い場合、UI は kind:0 の `picture` URL を直接読む。
+
+## ライセンス
+
+MIT

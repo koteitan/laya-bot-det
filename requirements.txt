@@ -1,0 +1,6 @@
+onnxruntime-gpu>=1.21 ; platform_machine == "x86_64"
+onnxruntime>=1.20 ; platform_machine != "x86_64"
+tokenizers>=0.21
+huggingface-hub>=0.30
+websockets>=15
+numpy>=1.24

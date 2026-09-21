@@ -1,0 +1,27 @@
+{
+ "source": "kind:10002",
+ "created_at": 1785249460,
+ "read": [
+  "wss://r.kojira.io",
+  "wss://relay.damus.io",
+  "wss://yabu.me",
+  "wss://nostr.compile-error.net",
+  "wss://relay.primal.net",
+  "wss://pyramid.fiatjaf.com",
+  "wss://relay.snort.social",
+  "wss://relay-jp.nostr.wirednet.jp",
+  "wss://cagliostr.compile-error.net"
+ ],
+ "write": [
+  "wss://r.kojira.io",
+  "wss://relay.damus.io",
+  "wss://yabu.me",
+  "wss://nostr.compile-error.net",
+  "wss://relay.primal.net",
+  "wss://relay.snort.social",
+  "wss://relay-jp.nostr.wirednet.jp",
+  "wss://cagliostr.compile-error.net"
+ ],
+ "npub": "npub1f3w4x7dqvceeez8kuyq78md3lwhwfm0ra634llr0r3nykwjrs0hqvldhgk",
+ "pubkey": "4c5d5379a066339c88f6e101e3edb1fbaee4ede3eea35ffc6f1c664b3a4383ee"
+}

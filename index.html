@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>laya-bot-det</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>laya-bot-det <span id="version" class="version"></span></h1>
+  <p id="summary" class="summary">読み込み中…</p>
+  <div class="menu">
+    <button id="menu-button" aria-label="メニュー" aria-expanded="false">☰</button>
+    <div id="menu-panel" class="menu-panel" hidden>
+      <label><input type="checkbox" id="opt-dark" checked> ダークモード</label>
+      <hr>
+      <label>しきい値 <output id="opt-threshold-out">0.40</output>
+        <input type="range" id="opt-threshold" min="0" max="1" step="0.01" value="0.40">
+      </label>
+      <hr>
+      <label>並び順
+        <select id="opt-sort">
+          <option value="score">bot スコア順</option>
+          <option value="laya">Laya スコア順</option>
+          <option value="heuristic">統計スコア順</option>
+          <option value="posts">投稿数順</option>
+        </select>
+      </label>
+      <label>表示
+        <select id="opt-filter">
+          <option value="all">すべて</option>
+          <option value="bot">bot 判定のみ</option>
+          <option value="human">human 判定のみ</option>
+          <option value="labelled">NIP-24 ラベル付きのみ</option>
+          <option value="disagree">Laya と統計が食い違うもの</option>
+        </select>
+      </label>
+      <hr>
+      <label><input type="checkbox" id="opt-posts" checked> 投稿サンプルを表示</label>
+    </div>
+  </div>
+</header>
+<main id="list"></main>
+<footer>
+  <p>判定は <code>mizchi/laya-multilingual-onnx</code>（Laya, mmBERT-base 322M）と決定的な投稿統計の合成。
+     スコアは較正されていません — 順位は意味を持ちますが、絶対値は持ちません。</p>
+</footer>
+<script src="main.js"></script>
+</body>
+</html>
