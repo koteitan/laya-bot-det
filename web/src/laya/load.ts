@@ -2,27 +2,33 @@
  *
  *  The weights are not served from this site: `model.onnx` is 647 MB and
  *  `tokenizer.json` another 34 MB, well past what GitHub Pages will host. They
- *  come from the Hugging Face CDN and land in a Cache API bucket, so the cost is
- *  paid once per browser rather than once per visit.
+ *  come from the Hugging Face CDN.
+ *
+ *  This composes the agent the way the vendored `loadAgent` does, but fetches
+ *  the model through `download.ts` instead, so an interrupted transfer resumes
+ *  from the last 16 MB chunk rather than starting over. See that file for why.
  */
 
-import { loadAgent, type LoadProgress, type Provider } from "./vendor/session.ts";
-import type { LayaAgent } from "./vendor/agent.ts";
+import { LayaAgent } from "./vendor/agent.ts";
+import { LayaTokenizer, type TokenizerConfig, type TokenizerJson } from "./vendor/tokenizer.ts";
+import { OnnxRunner, type OnnxConfig, type Provider } from "./vendor/session.ts";
+import type { AgentConfig } from "./vendor/types.ts";
+import { cachedBytes, downloadModel, fetchJsonCached } from "./download.ts";
 
 export const MODEL_URL = "https://huggingface.co/mizchi/laya-multilingual-onnx/resolve/main/";
-export const TOKENIZER_BYTES = 34_400_000;
+export const TOKENIZER_BYTES = 34_363_188;
 export const MODEL_BYTES = 646_870_871;
+
+const modelFile = MODEL_URL + "model.onnx";
 
 export interface Loaded {
   agent: LayaAgent;
   provider: Provider;
 }
 
-/** Which file the loader is on. `loadBundle` fetches the four JSON files first --
- *  one of which is the 34 MB tokenizer -- and only reports progress for
- *  `model.onnx`, so without this the UI sits at 0% through a large download and
- *  looks wedged. */
-export type Phase = "config" | "model";
+/** Which file the loader is on. The 34 MB tokenizer comes before the model, and
+ *  without naming it the UI sits at 0% through a large download. */
+export type Phase = "config" | "model" | "session";
 
 export interface Failure {
   phase: Phase;
@@ -35,24 +41,41 @@ export async function load(
 ): Promise<Loaded> {
   let phase: Phase = "config";
   let received = 0;
-  onProgress("config", 0, TOKENIZER_BYTES);
   try {
-    const { agent, provider } = await loadAgent(MODEL_URL, {
+    onProgress("config", 0, TOKENIZER_BYTES);
+    const [config, onnxConfig, tokenizerJson, tokenizerConfig] = await Promise.all([
+      fetchJsonCached<AgentConfig>(MODEL_URL + "rl_agent_config.json"),
+      fetchJsonCached<OnnxConfig>(MODEL_URL + "onnx_config.json"),
+      fetchJsonCached<TokenizerJson>(MODEL_URL + "tokenizer/tokenizer.json"),
+      fetchJsonCached<TokenizerConfig>(MODEL_URL + "tokenizer/tokenizer_config.json"),
+    ]);
+    if (onnxConfig.format !== "laya-onnx") {
+      throw new Error(`Not a Laya ONNX bundle: ${MODEL_URL}`);
+    }
+
+    phase = "model";
+    const model = await downloadModel(modelFile, (p) => {
+      received = p.received;
+      onProgress("model", p.received, p.total);
+    });
+
+    phase = "session";
+    onProgress("session", MODEL_BYTES, MODEL_BYTES);
+    const runner = await OnnxRunner.create(model, {
       providers: ["webgpu", "wasm"],
-      cacheName: "laya-models",
       // onnxruntime-web fetches these at runtime; vite.config.ts copies them to dist/ort/.
       wasmPaths: `${import.meta.env.BASE_URL}ort/`,
-      onProgress: (p: LoadProgress) => {
-        phase = "model";
-        received = p.received;
-        onProgress("model", p.received, p.total ?? MODEL_BYTES);
-      },
     });
-    return { agent, provider };
+    const agent = new LayaAgent({
+      config,
+      tokenizer: new LayaTokenizer(tokenizerJson, tokenizerConfig),
+      runner,
+    });
+    return { agent, provider: runner.provider };
   } catch (error) {
     // Naming the file and the byte count turns "Load failed" into something
-    // actionable: a browser that gave up 300 MB into model.onnx is a different
-    // problem from one that never got the tokenizer.
+    // actionable: a browser that gave up 300 MB in is a different problem from
+    // one that never got the tokenizer.
     const failure: Failure = {
       phase,
       received,
@@ -64,13 +87,7 @@ export async function load(
 
 export const hasWebGPU = (): boolean => "gpu" in navigator;
 
-/** Whether a previous visit already paid for the model. */
-export async function isCached(): Promise<boolean> {
-  try {
-    if (typeof caches === "undefined") return false;
-    const cache = await caches.open("laya-models");
-    return (await cache.match(MODEL_URL + "model.onnx")) !== undefined;
-  } catch {
-    return false;
-  }
+/** How much of the model a previous visit already paid for. */
+export async function cachedProgress(): Promise<number> {
+  return (await cachedBytes(modelFile))?.received ?? 0;
 }

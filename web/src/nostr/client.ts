@@ -78,11 +78,14 @@ export function discoverRelays(pubkey: string, eoseMs = 5000): Observable<RelayL
     const found = rxNostr.use(req, { on: { relays: BOOTSTRAP } }).pipe(
       uniq(),
       map((packet) => packet.event),
-      // Keep whichever event is newest so far, and re-emit when a newer one lands.
-      scan(
-        (best, event) => (event.created_at > (best?.created_at ?? -1) ? event : best),
-        null as null | NostrEvent,
-      ),
+      // kind:10002 outranks kind:3 whatever the timestamps say -- a newer contact
+      // list must not displace an older relay list, which comparing `created_at`
+      // alone would let it do. Within one kind, newest wins.
+      scan((best, event) => {
+        if (!best) return event;
+        if (best.kind !== event.kind) return best.kind === 10002 ? best : event;
+        return event.created_at > best.created_at ? event : best;
+      }, null as null | NostrEvent),
       filter((event): event is NostrEvent => event !== null),
       map((event): RelayList | null => {
         if (event.kind === 10002) {

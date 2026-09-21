@@ -17,7 +17,7 @@ import {
 import { decodeNpub, encodeNpub } from "./nostr/nip19.ts";
 import { features, heuristicScore, type Note } from "./detect/features.ts";
 import { buildState, combinedScore, QUESTIONS } from "./detect/questions.ts";
-import { hasWebGPU, isCached, load, MODEL_BYTES, TOKENIZER_BYTES, type Phase } from "./laya/load.ts";
+import { cachedProgress, hasWebGPU, load, MODEL_BYTES, TOKENIZER_BYTES, type Phase } from "./laya/load.ts";
 import type { LayaAgent } from "./laya/vendor/agent.ts";
 import { AuthorCard, type Author, type LayaVerdict } from "./ui/AuthorCard.tsx";
 import { Menu } from "./ui/Menu.tsx";
@@ -31,7 +31,7 @@ const MAX_NOTES_PER_AUTHOR = 30;
 const REBUILD_MS = 1000;
 
 type LayaState =
-  | { kind: "idle"; cached: boolean }
+  | { kind: "idle"; cached: number }
   | { kind: "loading"; phase: Phase; received: number; total: number }
   | { kind: "ready"; provider: string; judged: number }
   | { kind: "error"; phase: Phase; received: number; message: string };
@@ -41,7 +41,7 @@ export function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [relays, setRelays] = useState<RelayList | null>(null);
   const [authors, setAuthors] = useState<Author[]>([]);
-  const [laya, setLaya] = useState<LayaState>({ kind: "idle", cached: false });
+  const [laya, setLaya] = useState<LayaState>({ kind: "idle", cached: 0 });
   const [noteCount, setNoteCount] = useState(0);
 
   const notesRef = useRef(new Map<string, Note[]>());
@@ -196,7 +196,7 @@ export function App() {
   }, [laya.kind]);
 
   useEffect(() => {
-    void isCached().then((cached) =>
+    void cachedProgress().then((cached: number) =>
       setLaya((s) => (s.kind === "idle" ? { kind: "idle", cached } : s)),
     );
   }, []);
@@ -291,6 +291,7 @@ const MB = (n: number) => Math.round(n / 1e6);
 const PHASE_LABEL: Record<Phase, string> = {
   config: `設定とトークナイザ (${MB(TOKENIZER_BYTES)} MB)`,
   model: `モデル (${MB(MODEL_BYTES)} MB)`,
+  session: "モデルを GPU に載せています",
 };
 
 function LayaStatus({ state, onStart }: { state: LayaState; onStart: () => void }) {
@@ -298,9 +299,11 @@ function LayaStatus({ state, onStart }: { state: LayaState; onStart: () => void 
     return (
       <p className="laya-status">
         いまは<b>統計のみ</b>で判定中。
-        {state.cached
-          ? "Laya はキャッシュ済みなので、すぐ使えます。"
-          : `Laya を足すには ${MB(MODEL_BYTES + TOKENIZER_BYTES)} MB のダウンロードが要ります（初回だけ）。`}{" "}
+        {state.cached >= MODEL_BYTES
+          ? "Laya はキャッシュ済みなので、ダウンロードなしで使えます。"
+          : state.cached > 0
+            ? `Laya は ${MB(state.cached)} / ${MB(MODEL_BYTES)} MB までキャッシュ済み。続きから再開します。`
+            : `Laya を足すには ${MB(MODEL_BYTES + TOKENIZER_BYTES)} MB のダウンロードが要ります（初回だけ）。`}{" "}
         <button onClick={onStart}>Laya を読み込む</button>
         {!hasWebGPU() ? " ※ WebGPU が無いので WASM で動きます（かなり遅い）" : null}
       </p>
@@ -310,10 +313,12 @@ function LayaStatus({ state, onStart }: { state: LayaState; onStart: () => void 
     const pct = state.total ? Math.min(100, (state.received / state.total) * 100) : 0;
     return (
       <p className="laya-status">
-        {PHASE_LABEL[state.phase]} を読み込み中{" "}
-        {state.phase === "config" && state.received === 0
+        {PHASE_LABEL[state.phase]}
+        {state.phase === "session"
           ? "…"
-          : `${pct.toFixed(0)}% (${MB(state.received)} / ${MB(state.total)} MB)`}
+          : state.phase === "config" && state.received === 0
+            ? " を読み込み中…"
+            : ` を読み込み中 ${pct.toFixed(0)}% (${MB(state.received)} / ${MB(state.total)} MB)`}
       </p>
     );
   }
@@ -321,7 +326,7 @@ function LayaStatus({ state, onStart }: { state: LayaState; onStart: () => void 
     return (
       <p className="laya-status error">
         Laya の読み込みに失敗: {state.message} — {PHASE_LABEL[state.phase]} の途中、
-        {MB(state.received)} MB 受信したところ。{" "}
+        {MB(state.received)} MB 受信したところ。ここまでは保存してあるので、続きから再開します。{" "}
         <button onClick={onStart}>やり直す</button>
       </p>
     );
