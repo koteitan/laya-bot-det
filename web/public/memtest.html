@@ -54,7 +54,8 @@ Laya (int8) を動かすには <b>約 800 MB</b>、fp16 なら <b>約 1.3 GB</b>
   <p>
     <button id="contig">ArrayBuffer 1本</button>
     <button id="wasmmem">WebAssembly メモリ</button>
-    <button id="both">両方を同時に（本番と同じ）</button>
+    <button id="both">両方を同時に</button>
+    <button id="wasmgrow">wasm を grow で伸ばす（本番と同じ）</button>
   </p>
   <div id="contiglog" class="dim"></div>
 </div>
@@ -153,7 +154,10 @@ document.getElementById("wasmmem").onclick = async function () {
   this.disabled = true;
   contigLog.textContent = "";
   var PAGE = 65536;
-  var sizes = [325, 400, 500, 647, 775];
+  // create() の中では、生の重みと ORT が組み直した表現が同時に wasm ヒープに
+  // 乗る。必要なのはモデルサイズの 2 倍前後で、647MB なら 1.3GB 以上を 1 本の
+  // 線形メモリとして要求する。775 MB までしか測っていなかった。
+  var sizes = [325, 650, 775, 1000, 1300, 1600, 2000, 2500];
   for (var i = 0; i < sizes.length; i++) {
     var mb = sizes[i], pages = Math.ceil((mb * 1048576) / PAGE);
     try {
@@ -176,6 +180,34 @@ document.getElementById("wasmmem").onclick = async function () {
 // onnxruntime に渡すと、create が終わるまで元のバッファは解放できず、
 // wasm 側のコピーと並んで存在する。上の 2 つのボタンは 1 つずつ試して
 // 都度解放していたので、この条件を測っていなかった。
+// onnxruntime は小さく確保してから grow() で伸ばす。初期値で一括確保するのとは
+// 挙動が違うことがあるので、そちらも測る。ここが本番と同じ形。
+document.getElementById("wasmgrow").onclick = async function () {
+  this.disabled = true;
+  contigLog.textContent = "";
+  var PAGE = 65536, STEP = 64 * 1048576 / PAGE;
+  var mem;
+  try { mem = new WebAssembly.Memory({ initial: STEP }); }
+  catch (e) { contigLog.textContent = "初期確保に失敗: " + e; this.disabled = false; return; }
+  var mb = 64;
+  for (;;) {
+    try {
+      mem.grow(STEP);
+      mb += 64;
+      var v = new Uint8Array(mem.buffer);
+      v[v.length - 1] = 1;
+      if (mb % 256 === 0) contigLog.textContent += "grow して " + mb + " MB OK\n";
+      if (mb >= 2560) { contigLog.textContent += "2560 MB まで到達。ここで停止。\n"; break; }
+    } catch (e) {
+      contigLog.textContent += "grow " + (mb + 64) + " MB で失敗: " + e.name + " " + e.message + "\n";
+      break;
+    }
+    await new Promise(function (r) { setTimeout(r, 30); });
+  }
+  contigLog.textContent += "終了\n";
+  this.disabled = false;
+};
+
 document.getElementById("both").onclick = async function () {
   this.disabled = true;
   contigLog.textContent = "";
