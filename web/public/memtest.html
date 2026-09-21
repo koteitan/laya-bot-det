@@ -40,7 +40,7 @@ Laya (int8) を動かすには <b>約 800 MB</b>、fp16 なら <b>約 1.3 GB</b>
 <div class="box">
   <div class="dim">WebGPU がこの端末で何を許しているか</div>
   <div id="gpu" class="dim">調べています…</div>
-  <p><button id="gpubuf">GPU バッファを確保してみる</button></p>
+  <p><button id="gpubuf">モデルと同じ大きさで1本確保してみる</button></p>
   <div id="gpulog" class="dim"></div>
 </div>
 
@@ -158,20 +158,33 @@ document.getElementById("gpubuf").onclick = async function () {
   } catch (e) { gpuLog.textContent = "device を取れません: " + e; return; }
   device.addEventListener &&
     device.addEventListener("uncapturederror", function (ev) { gpuLog.textContent += "\nGPU error: " + ev.error; });
-  var held = [], total = 0;
-  var sizes = [64, 128, 256, 512, 1024];
-  for (var i = 0; i < sizes.length; i++) {
-    var want = sizes[i] * 1048576;
-    if (want > adapter.limits.maxBufferSize) { gpuLog.textContent += sizes[i] + " MB: 上限超え（試さない）\n"; continue; }
-    try {
-      held.push(device.createBuffer({ size: want, usage: GPUBufferUsage.STORAGE }));
-      total += want;
-      gpuLog.textContent += sizes[i] + " MB OK（累計 " + Math.round(total / 1048576) + " MB）\n";
-    } catch (e) {
-      gpuLog.textContent += sizes[i] + " MB 失敗: " + e.name + "\n";
-      break;
+  // The sizes that matter are the two model files, taken as ONE buffer each --
+  // that is what loading actually asks for. A ladder of small buffers can all
+  // succeed while the single large one the model needs does not.
+  var cases = [
+    ["int8 モデル 1本", 325],
+    ["fp16 モデル 1本", 647],
+    ["fp16 + 作業領域", 647 + 128],
+  ];
+  for (var i = 0; i < cases.length; i++) {
+    var label = cases[i][0], want = cases[i][1] * 1048576;
+    if (want > adapter.limits.maxBufferSize) {
+      gpuLog.textContent += label + " (" + cases[i][1] + " MB): maxBufferSize 超え — 確実に不可\n";
+      continue;
     }
-    await new Promise(function (r) { setTimeout(r, 80); });
+    var buf = null;
+    try {
+      buf = device.createBuffer({ size: want, usage: GPUBufferUsage.STORAGE });
+      // createBuffer can return an invalid buffer without throwing; the error
+      // only surfaces through the error scope.
+      device.pushErrorScope("out-of-memory");
+      var err = await device.popErrorScope();
+      gpuLog.textContent += label + " (" + cases[i][1] + " MB): " + (err ? "失敗 " + err.message : "OK") + "\n";
+      buf.destroy();
+    } catch (e) {
+      gpuLog.textContent += label + " (" + cases[i][1] + " MB): 例外 " + e.name + " " + e.message + "\n";
+    }
+    await new Promise(function (r) { setTimeout(r, 120); });
   }
   gpuLog.textContent += "終了";
 };
