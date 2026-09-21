@@ -1,6 +1,8 @@
 # laya-bot-det
 
-nostr の kind:1 を集めて、投稿者ごとに bot かどうかを判定する。
+Jev のローカル化クローンの laya-mlx を onnx export された mizchi/laya-mlx を使って、 nostr の kind:1 から投稿者ごとに bot かどうかを判定する。
+
+デモでは ./bot-det all 実行後に index.html に判定結果が出る。
 
 判定は2つのスコアの合成:
 
