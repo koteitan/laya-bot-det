@@ -1,8 +1,8 @@
 # laya-bot-det
 
-Jev のローカル化クローンの laya-mlx を onnx export された mizchi/laya-mlx を使って、 nostr の kind:1 から投稿者ごとに bot かどうかを判定する。
+Jev と同じ System One 系のオープンウェイトモデル [Laya](https://github.com/NandhaKishorM/laya) を [mizchi/laya-mlx](https://github.com/mizchi/laya-mlx) の ONNX export 経由で使って、nostr の kind:0 と kind:1 から投稿者ごとに bot かどうかを判定する。
 
-デモでは ./bot-det all 実行後に index.html に判定結果が出る。
+デモでは `./bot-det all` を実行したあと `index.html` に判定結果が出る。
 
 判定は2つのスコアの合成:
 
