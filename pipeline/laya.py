@@ -1,8 +1,15 @@
 """Laya typed-decision inference on onnxruntime.
 
-A port of the upstream prompt construction, batching and calibration
-(`laya_mlx.common` / `laya_mlx.agent`, and the `@laya-mlx/web` TypeScript port)
-onto the exported ONNX graph, so this runs on CUDA or CPU instead of Apple MLX.
+Derived from Laya (https://github.com/NandhaKishorM/laya, Copyright Convai
+Innovations and Laya contributors) by way of laya-mlx
+(https://github.com/mizorewww/laya-mlx) and mizchi's fork of it
+(https://github.com/mizchi/laya-mlx, revision dc3aa6b1). Licensed under
+Apache-2.0; see the LICENSE and NOTICE files at the repository root.
+
+Changed from those sources: the prompt construction, batching and calibration
+are reimplemented in Python against the exported ONNX graph rather than MLX or
+onnxruntime-web, CUDA library preloading is added, and the language router,
+presets, email helpers and action-cost handling are omitted.
 
 The graph takes `input_ids`, `attention_mask`, `marker_pos`, `marker_mask` and
 `qtype`, and returns `logits` (one per option marker) and `act_logits`. The option

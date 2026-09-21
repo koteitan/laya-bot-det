@@ -1,0 +1,46 @@
+laya-bot-det
+Copyright 2026 koteitan
+
+Licensed under the Apache License, Version 2.0. See LICENSE.
+
+------------------------------------------------------------------------
+This product includes software derived from Laya, through two intermediate
+ports. All of them are licensed under Apache-2.0.
+
+1. Laya
+   https://github.com/NandhaKishorM/laya
+   Copyright Convai Innovations and Laya contributors.
+   The token sequence construction, question rendering, calibration and
+   confidence calculation originate here.
+
+2. laya-mlx (an MLX runtime for Laya)
+   https://github.com/mizorewww/laya-mlx
+   Copyright 2026 laya-mlx contributors.
+   Source revision referenced: fc1df62828a3fedf4d8229fdac1cbd85f1cdf337
+
+3. laya-mlx, mizchi's fork (adds the ONNX export and a TypeScript runtime)
+   https://github.com/mizchi/laya-mlx
+   Source revision referenced: dc3aa6b150cb861d0788fbd421cfd1303de4ed57
+   `pipeline/laya.py` in this repository is a Python port of that fork's
+   `web/packages/laya-web/src/{prompt,calibration,questions}.ts`, which are
+   themselves a TypeScript port of Laya's `laya_mlx.common` / `laya_mlx.agent`.
+
+Changes made in this repository (Apache-2.0 section 4(b)):
+   - Reimplemented the above in Python against onnxruntime rather than MLX,
+     Core ML or onnxruntime-web.
+   - Added CUDA shared-library preloading so the CUDA execution provider is
+     usable when those libraries come from `nvidia-*-cu12` pip packages
+     installed in a user site directory.
+   - Dropped the parts not needed here: the language router, application
+     presets, email helpers, retry and action-cost handling.
+
+Model weights are downloaded separately from Hugging Face and are not included
+in this repository:
+   https://huggingface.co/mizchi/laya-multilingual-onnx  (Apache-2.0)
+   derived from
+   https://huggingface.co/convaiinnovations/laya-multilingual  (Apache-2.0)
+
+------------------------------------------------------------------------
+No other part of this repository is derived from the projects above. The nostr
+collection, the posting statistics, the question design, the evaluation against
+NIP-24 labels and the web page are original to this repository.

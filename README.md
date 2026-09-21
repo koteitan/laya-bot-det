@@ -201,4 +201,15 @@ data/                生成物。cache/pictures だけ .gitignore
 
 ## ライセンス
 
-MIT
+Apache-2.0。
+
+`pipeline/laya.py` は Laya (Convai Innovations) の派生で、laya-mlx とその
+mizchi フォークを経由している。いずれも Apache-2.0。派生の連鎖、参照した
+リビジョン、加えた変更は `NOTICE` に記載。
+
+それ以外 — nostr の収集、投稿統計、質問の設計、NIP-24 ラベルによる評価、
+web ページ — はこのリポジトリのオリジナル。
+
+モデルの重みはリポジトリに含まない。実行時に Hugging Face から取得する
+([mizchi/laya-multilingual-onnx](https://huggingface.co/mizchi/laya-multilingual-onnx)、
+Apache-2.0)。
