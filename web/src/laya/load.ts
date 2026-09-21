@@ -166,11 +166,39 @@ export const hasWebGPU = (): boolean => "gpu" in navigator;
 
 export { clearModelCache };
 
-/** How much of the download a previous visit already paid for, across both big files. */
+/** The real size of whichever bundle is in use.
+ *
+ *  MODEL_BYTES describes the default one. A bundle named by `?model=` is a
+ *  different size -- the int8 build is 325 MB, not 647 -- and quoting the
+ *  default's figure at someone about to download it is simply wrong. A split
+ *  bundle states its size in its manifest; otherwise ask the file itself. */
+async function bundleBytes(): Promise<number> {
+  if (!usingCustomModel()) return MODEL_BYTES + TOKENIZER_BYTES;
+  try {
+    const manifest = await fetch(MODEL_FILE + ".parts.json");
+    if (manifest.ok) {
+      const { size } = (await manifest.json()) as { size: number };
+      if (Number.isFinite(size) && size > 0) return size + TOKENIZER_BYTES;
+    }
+    const head = await fetch(MODEL_FILE, { headers: { Range: "bytes=0-0" } });
+    const range = head.headers.get("content-range");
+    const size = range
+      ? Number(range.split("/")[1])
+      : Number(head.headers.get("content-length"));
+    if (Number.isFinite(size) && size > 0) return size + TOKENIZER_BYTES;
+  } catch {
+    // Unreachable host: fall through to the default's figure rather than
+    // blocking the page on a number that is only for display.
+  }
+  return MODEL_BYTES + TOKENIZER_BYTES;
+}
+
+/** How much of the download a previous visit already paid for. */
 export async function cachedProgress(): Promise<{ received: number; total: number }> {
-  const [model, tokenizer] = await Promise.all([
+  const [model, tokenizer, total] = await Promise.all([
     cachedBytes(MODEL_FILE),
     cachedBytes(TOKENIZER_FILE),
+    bundleBytes(),
   ]);
-  return { received: model + tokenizer, total: MODEL_BYTES + TOKENIZER_BYTES };
+  return { received: model + tokenizer, total };
 }

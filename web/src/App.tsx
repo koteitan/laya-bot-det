@@ -220,6 +220,16 @@ export function App() {
   // can hold 681 MB, and on a device whose tab was killed mid-write that is the
   // one thing most likely to take the page down with it. Nothing here needs the
   // figure until someone reaches for the button.
+  // Reading the cache on mount is avoided elsewhere, but a custom bundle's size
+  // has to come from the host, and quoting the default's 681 MB for a 359 MB
+  // bundle misleads exactly the person who went out of their way to name it.
+  useEffect(() => {
+    if (!usingCustomModel()) return;
+    void cachedProgress().then(({ received, total }) =>
+      setLaya((s) => (s.kind === "idle" ? { kind: "idle", cached: received, total } : s)),
+    );
+  }, []);
+
   const checkCache = useCallback(() => {
     void cachedProgress().then(({ received, total }) =>
       setLaya((s) => (s.kind === "idle" ? { kind: "idle", cached: received, total } : s)),
