@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
+import { installGlobalHandlers } from "./laya/trace.ts";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
 import "./styles.css";
 
@@ -43,6 +44,7 @@ async function reset(): Promise<void> {
 if (new URLSearchParams(location.search).has("reset")) {
   void reset();
 } else {
+  installGlobalHandlers();
   createRoot(root).render(
     <StrictMode>
       <ErrorBoundary>

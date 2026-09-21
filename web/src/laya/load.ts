@@ -14,6 +14,7 @@ import { LayaAgent } from "./vendor/agent.ts";
 import { LayaTokenizer, type TokenizerConfig, type TokenizerJson } from "./vendor/tokenizer.ts";
 import { OnnxRunner, type OnnxConfig, type Provider } from "./vendor/session.ts";
 import type { AgentConfig } from "./vendor/types.ts";
+import { mark } from "./trace.ts";
 import {
   cachedBytes,
   clearModelCache,
@@ -51,9 +52,11 @@ export async function load(
   let phase: Phase = "config";
   let received = 0;
   try {
+    mark("load:start", navigator.userAgent.slice(0, 120));
     // Entries from an earlier chunk size can never be read again; reclaim them
     // before asking the browser for several hundred more MB.
     await pruneStaleChunks();
+    mark("prune:done");
     onProgress("config", 0, TOKENIZER_BYTES);
     // The tokenizer is 34 MB and goes through the same resumable path as the
     // model; the other three configs are a few hundred bytes each and only ride
@@ -67,16 +70,25 @@ export async function load(
       }),
       downloadJson<TokenizerConfig>(MODEL_URL + "tokenizer/tokenizer_config.json"),
     ]);
+    mark("config:done", `tokenizer ${JSON.stringify(tokenizerJson).length} chars`);
     if (onnxConfig.format !== "laya-onnx") {
       throw new Error(`Not a Laya ONNX bundle: ${MODEL_URL}`);
     }
 
     phase = "model";
     received = 0;
+    let lastMark = 0;
     const model = await downloadBytes(MODEL_FILE, (p: Progress) => {
       received = p.received;
       onProgress("model", p.received, p.total);
+      // One mark per 64 MB: enough to see where a download stops, few enough
+      // not to be the thing that slows it down.
+      if (p.received - lastMark >= 64 * 1024 * 1024) {
+        lastMark = p.received;
+        mark("model:chunk", `${Math.round(p.received / 1e6)} MB`);
+      }
     });
+    mark("model:done", `${model.byteLength} bytes`);
 
     phase = "session";
     onProgress("session", MODEL_BYTES, MODEL_BYTES);
@@ -90,30 +102,35 @@ export async function load(
     // them anyway is the one thing the Node runs, which load the same model
     // from the same bytes without incident, do differently.
     // `?threads=N` overrides this for testing.
-    const threads = Number(new URLSearchParams(location.search).get("threads"));
+    const params = new URLSearchParams(location.search);
+    const threads = Number(params.get("threads"));
     ort.env.wasm.numThreads = Number.isFinite(threads) && threads > 0 ? threads : 1;
     // `?provider=wasm` forces the CPU backend. WebGPU is the default because it
     // is far faster, but it is also where this fails on some devices, and the
     // failure takes the tab with it rather than returning an error to catch --
     // so the choice has to be reachable from outside the code.
-    const forced = new URLSearchParams(location.search).get("provider");
+    const forced = params.get("provider");
     const providers: Provider[] =
       forced === "wasm" ? ["wasm"] : forced === "webgpu" ? ["webgpu"] : ["webgpu", "wasm"];
+    mark("session:create:before", `threads=${ort.env.wasm.numThreads} providers=${providers.join(",")}`);
     const runner = await OnnxRunner.create(model, {
       providers,
       // onnxruntime-web fetches these at runtime; vite.config.ts copies them to dist/ort/.
       wasmPaths: `${import.meta.env.BASE_URL}ort/`,
     });
+    mark("session:create:after", runner.provider);
     const agent = new LayaAgent({
       config,
       tokenizer: new LayaTokenizer(tokenizerJson, tokenizerConfig),
       runner,
     });
+    mark("agent:ready", runner.provider);
     return { agent, provider: runner.provider };
   } catch (error) {
     // Naming the file and the byte count turns "Load failed" into something
     // actionable: a browser that gave up 300 MB in is a different problem from
     // one that never got the tokenizer.
+    mark("load:error", error instanceof Error ? error.message.slice(0, 200) : String(error));
     const failure: Failure = {
       phase,
       received,

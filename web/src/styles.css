@@ -102,6 +102,11 @@ main { padding: 14px 16px 40px; display: flex; flex-direction: column; gap: 10px
 .posts { margin-top: 8px; border-top: 1px solid var(--line); padding-top: 7px;
          font-size: 12px; color: var(--dim); }
 .posts div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trace { margin: 0 16px; padding: 12px; background: var(--card); border: 1px solid var(--bot);
+         border-radius: 8px; font-size: 11px; color: var(--dim); white-space: pre-wrap;
+         font-family: ui-monospace, monospace; overflow-x: auto; }
+.trace button { margin-top: 8px; background: var(--bg); color: var(--fg);
+                border: 1px solid var(--line); border-radius: 5px; padding: 5px 10px; cursor: pointer; }
 .boundary { padding: 24px 16px; line-height: 1.8; }
 .boundary h1 { font-size: 18px; color: var(--bot); }
 .boundary a { color: var(--human); }

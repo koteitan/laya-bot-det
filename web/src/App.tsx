@@ -18,6 +18,7 @@ import { decodeNpub, encodeNpub } from "./nostr/nip19.ts";
 import { features, heuristicScore, type Note } from "./detect/features.ts";
 import { buildState, combinedScore, QUESTIONS } from "./detect/questions.ts";
 import { memoryWarning } from "./laya/capability.ts";
+import { clearTrace, crashed, format, mark, trace } from "./laya/trace.ts";
 import {
   cachedProgress,
   clearModelCache,
@@ -52,6 +53,9 @@ export function App() {
   const [authors, setAuthors] = useState<Author[]>([]);
   const [laya, setLaya] = useState<LayaState>({ kind: "idle", cached: 0, total: MODEL_BYTES + TOKENIZER_BYTES });
   const [noteCount, setNoteCount] = useState(0);
+  // A run that never reached "done" left its marks behind; show them, since the
+  // crash took the console with it.
+  const [showTrace, setShowTrace] = useState(() => crashed());
 
   const notesRef = useRef(new Map<string, Note[]>());
   const judgedRef = useRef(new Map<string, { at: number; verdict: LayaVerdict }>());
@@ -175,7 +179,9 @@ export function App() {
         }
         const notes = notesRef.current.get(target)!;
         try {
+          if (judgedRef.current.size === 0) mark("predict:first:before");
           const result = await agent.predict(buildState(notes, getProfile(target)), QUESTIONS);
+          if (judgedRef.current.size === 0) mark("predict:first:after");
           const a = result.answers;
           const hb = a.bot_hb?.type === "choice" ? a.bot_hb.probabilities.bot ?? 0 : 0;
           const bh = a.bot_bh?.type === "choice" ? a.bot_bh.probabilities.bot ?? 0 : 0;
@@ -221,6 +227,7 @@ export function App() {
     })
       .then(({ agent, provider }) => {
         agentRef.current = agent;
+        mark("done", provider);
         setLaya({ kind: "ready", provider, judged: 0 });
       })
       .catch((e: unknown) => {
@@ -294,6 +301,14 @@ export function App() {
           cachedProfiles={cachedProfileCount()}
         />
       </header>
+      {showTrace ? (
+        <pre className="trace">
+          {"前回の読み込みは最後まで到達していません。ここで止まりました:\n\n"}
+          {format(trace())}
+          {"\n\n"}
+          <button onClick={() => { clearTrace(); setShowTrace(false); }}>この記録を消す</button>
+        </pre>
+      ) : null}
       <main>
         {shown.map((a) => (
           <AuthorCard key={a.pubkey} a={a} threshold={settings.threshold} showPosts={settings.showPosts} />
