@@ -49,7 +49,7 @@ export function clearTrace(): void {
   }
 }
 
-/** True when a previous run left marks without reaching the end. */
+/** True when a previous run left a record without reaching the end. */
 export function crashed(): boolean {
   const marks = read();
   return marks.length > 0 && marks[marks.length - 1]!.step !== "done";

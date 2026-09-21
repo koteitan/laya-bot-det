@@ -347,7 +347,8 @@ export function App() {
       ) : null}
       {showTrace ? (
         <pre className="trace">
-          {`足跡 (${traceMarks.length} 件):\n\n`}
+          {`読み込みの記録 (${traceMarks.length} 行) — どこまで進んだかの控えです。` +
+            `失敗したときは、この中身をそのままコピーして報告してください。\n\n`}
           {format(traceMarks)}
           {"\n\n"}
           {/* Read on demand. Marks written after this component mounted are not
