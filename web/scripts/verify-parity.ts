@@ -16,7 +16,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import * as ort from "onnxruntime-web";
 import { LayaAgent } from "../src/laya/vendor/agent.ts";
 import { LayaTokenizer } from "../src/laya/vendor/tokenizer.ts";
-import { OnnxRunner } from "../src/laya/vendor/session.ts";
+import { DirectRunner } from "../src/laya/runner.ts";
 import { buildState, combinedScore, QUESTIONS } from "../src/detect/questions.ts";
 import { features, heuristicScore, type Note } from "../src/detect/features.ts";
 import type { ChoiceAnswer } from "../src/laya/vendor/types.ts";
@@ -30,9 +30,9 @@ ort.env.wasm.wasmPaths = new URL("../node_modules/onnxruntime-web/dist/", import
 const json = (name: string) => JSON.parse(readFileSync(DIR + name, "utf8"));
 const bytes = readFileSync(DIR + "model.onnx");
 
-const runner = await OnnxRunner.create(
+const runner = await DirectRunner.create(
   bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
-  { providers: ["wasm"] },
+  { providers: ["wasm"], wasmPaths: ort.env.wasm.wasmPaths as string },
 );
 const agent = new LayaAgent({
   config: json("rl_agent_config.json"),

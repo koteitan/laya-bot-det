@@ -12,7 +12,8 @@
 import * as ort from "onnxruntime-web";
 import { LayaAgent } from "./vendor/agent.ts";
 import { LayaTokenizer, type TokenizerConfig, type TokenizerJson } from "./vendor/tokenizer.ts";
-import { OnnxRunner, type OnnxConfig, type Provider } from "./vendor/session.ts";
+import type { OnnxConfig, Provider } from "./vendor/session.ts";
+import { DirectRunner, type OptLevel } from "./runner.ts";
 import type { AgentConfig } from "./vendor/types.ts";
 import { mark } from "./trace.ts";
 import {
@@ -134,11 +135,34 @@ export async function load(
     const forced = params.get("provider");
     const providers: Provider[] =
       forced === "wasm" ? ["wasm"] : forced === "webgpu" ? ["webgpu"] : ["webgpu", "wasm"];
-    mark("session:create:before", `threads=${ort.env.wasm.numThreads} providers=${providers.join(",")}`);
-    const runner = await OnnxRunner.create(model, {
+    // Halving the model to 325 MB did not move the failure, so it is not the
+    // byte count. What both builds share is the graph, and everything ORT does
+    // to it before running: parsing it, then rewriting it. These two knobs turn
+    // each of those down.
+    //
+    // `?opt=disabled` skips every optimisation pass. If that is enough, the
+    // fault is in a rewrite, not in the model.
+    // `?proxy=1` runs onnxruntime in a worker, off the main thread, which also
+    // gives it its own stack -- the relevant difference if the parser is
+    // recursing deeper than WebKit's main-thread stack allows.
+    const opt = params.get("opt");
+    const level: OptLevel | undefined =
+      opt === "disabled" || opt === "basic" || opt === "extended" || opt === "all"
+        ? opt
+        : undefined;
+    if (params.get("proxy") === "1") ort.env.wasm.proxy = true;
+    mark(
+      "session:create:before",
+      `threads=${ort.env.wasm.numThreads} providers=${providers.join(",")}` +
+        ` opt=${level ?? "default"} proxy=${String(ort.env.wasm.proxy ?? false)}`,
+    );
+    const runner = await DirectRunner.create(model, {
       providers,
+      ...(level ? { optimization: level } : {}),
       // onnxruntime-web fetches these at runtime; vite.config.ts copies them to dist/ort/.
       wasmPaths: `${import.meta.env.BASE_URL}ort/`,
+      onAttempt: (provider, error) =>
+        mark(`session:${provider}:failed`, String(error).slice(0, 160)),
     });
     mark("session:create:after", runner.provider);
     const agent = new LayaAgent({
