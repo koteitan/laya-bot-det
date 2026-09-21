@@ -38,6 +38,11 @@ Laya (int8) を動かすには <b>約 800 MB</b>、fp16 なら <b>約 1.3 GB</b>
 <b>開き直してこのページに戻ってきてください</b>。上に最大値が出ます。</p>
 
 <div class="box">
+  <div class="dim">wasm のスレッド条件</div>
+  <div id="threads" class="dim"></div>
+</div>
+
+<div class="box">
   <div class="dim">WebGPU がこの端末で何を許しているか</div>
   <div id="gpu" class="dim">調べています…</div>
   <p><button id="gpubuf">モデルと同じ大きさで1本確保してみる</button></p>
@@ -199,6 +204,20 @@ document.getElementById("both").onclick = async function () {
   contigLog.textContent += "終了\n";
   this.disabled = false;
 };
+
+// マルチスレッド wasm は SharedArrayBuffer を要求し、それは COOP/COEP が
+// 揃った文脈でしか存在しない。GitHub Pages は送らないので、スレッドを
+// 要求すること自体が無意味であり、実装によっては落ちる。
+(function () {
+  var el = document.getElementById("threads");
+  var sab = typeof SharedArrayBuffer !== "undefined";
+  var iso = typeof crossOriginIsolated !== "undefined" ? crossOriginIsolated : false;
+  el.innerHTML =
+    "hardwareConcurrency: <b>" + (navigator.hardwareConcurrency || "?") + "</b><br>" +
+    'SharedArrayBuffer: <span class="' + (sab ? "ok" : "bad") + '">' + (sab ? "あり" : "なし") + "</span><br>" +
+    'crossOriginIsolated: <span class="' + (iso ? "ok" : "bad") + '">' + iso + "</span><br>" +
+    (iso ? "マルチスレッド wasm が使える" : "<b>シングルスレッドで動かすしかない</b>");
+})();
 
 // ---- WebGPU ----
 // JS のバッファが 2 GB 取れても、モデルを載せるのは GPU 側のバッファ。

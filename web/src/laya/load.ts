@@ -9,6 +9,7 @@
  *  from the last 16 MB chunk rather than starting over. See that file for why.
  */
 
+import * as ort from "onnxruntime-web";
 import { LayaAgent } from "./vendor/agent.ts";
 import { LayaTokenizer, type TokenizerConfig, type TokenizerJson } from "./vendor/tokenizer.ts";
 import { OnnxRunner, type OnnxConfig, type Provider } from "./vendor/session.ts";
@@ -79,6 +80,18 @@ export async function load(
 
     phase = "session";
     onProgress("session", MODEL_BYTES, MODEL_BYTES);
+
+    // Pin the wasm backend to one thread.
+    //
+    // Left unset, onnxruntime-web sizes its thread pool from
+    // hardwareConcurrency, and multi-threaded wasm needs SharedArrayBuffer,
+    // which needs COOP/COEP response headers. GitHub Pages does not send
+    // them, so the threads were never going to work here -- and asking for
+    // them anyway is the one thing the Node runs, which load the same model
+    // from the same bytes without incident, do differently.
+    // `?threads=N` overrides this for testing.
+    const threads = Number(new URLSearchParams(location.search).get("threads"));
+    ort.env.wasm.numThreads = Number.isFinite(threads) && threads > 0 ? threads : 1;
     // `?provider=wasm` forces the CPU backend. WebGPU is the default because it
     // is far faster, but it is also where this fails on some devices, and the
     // failure takes the tab with it rather than returning an error to catch --
