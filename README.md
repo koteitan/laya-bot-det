@@ -2,13 +2,45 @@
 
 Jev と同じ System One 系のオープンウェイトモデル [Laya](https://github.com/NandhaKishorM/laya) を [mizchi/laya-mlx](https://github.com/mizchi/laya-mlx) の ONNX export 経由で使って、nostr の kind:0 と kind:1 から投稿者ごとに bot かどうかを判定する。
 
-デモでは `./bot-det all` を実行したあと `index.html` に判定結果が出る。
+ブラウザだけで動く版が https://koteitan.github.io/laya-bot-det/ にある。
+リレーから流れてくる kind:1 をその場で判定する。
 
 判定は2つのスコアの合成:
 
 - **Laya** — [`mizchi/laya-multilingual-onnx`](https://huggingface.co/mizchi/laya-multilingual-onnx)
   (mmBERT-base 322M の typed decision モデル)。文章を読んで human / bot を選ぶ。
 - **統計** — 投稿間隔の規則性、テンプレ率、返信率など、決定的に計算できる指標。
+
+## web デモ (`web/`)
+
+ブラウザの中で完結する nostr クライアント。サーバーもパイプラインも要らない。
+
+開くとこの順に動く。
+
+1. bootstrap リレーから **kind:10002** を取る (rx-nostr backward)
+2. そこで得たリレーから **kind:1** を購読する (rx-nostr forward)
+3. 初めて見る author の **kind:0 と picture** を取り、localStorage と Cache API に入れる
+4. 投稿が 2 件たまった author から順に判定する
+5. 結果は observable 経由で随時描画される
+
+**Laya は任意**。開いた直後は決定的な統計だけで動いていて、ダウンロードは 0 バイト。
+モデルを足したくなったら「Laya を読み込む」を押す。**681 MB**
+(`model.onnx` 647 MB + `tokenizer.json` 34 MB) を Hugging Face から取って、
+Cache API に保存する。2 回目以降のアクセスでは再ダウンロードしない。
+推論は WebGPU、無ければ WASM にフォールバックする (かなり遅い)。
+
+この作りにしたのは、統計だけで AUC 0.839 出るから (下の表)。
+681 MB 払う前に、何が起きるかは見えている方がいい。
+
+```bash
+cd web
+npm install
+npm run build      # dist/ が出る。ローカルで見るならこれを配信する
+npm run dev        # vite の開発サーバ
+```
+
+`main` に push すると GitHub Actions が `web/dist` を Pages に出す
+(`.github/workflows/pages.yml`)。
 
 ## セットアップ
 
@@ -195,7 +227,13 @@ pipeline/
   detect.py          Laya に何をどう聞くか (上の表の結論)
   evaluate.py        NIP-24 ラベルに対する AUC / しきい値
   run.py             CLI
-index.html main.js style.css   結果表示 (ビルド不要)
+index.html main.js style.css   パイプラインの結果表示 (ビルド不要)
+web/                 ブラウザ版 nostr クライアント (TypeScript + Vite + React + rx-nostr)
+  src/nostr/         リレー探索、kind:1 購読、kind:0 と画像のキャッシュ
+  src/detect/        統計と質問の設計 (pipeline/ の移植)
+  src/laya/vendor/   @laya-mlx/web をそのまま vendor (npm 未公開のため)
+  src/ui/            カードとメニュー
+.github/workflows/pages.yml   web/dist を GitHub Pages にデプロイ
 data/                生成物。cache/pictures だけ .gitignore
 ```
 

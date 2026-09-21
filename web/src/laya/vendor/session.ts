@@ -1,0 +1,295 @@
+import * as ort from "onnxruntime-web";
+
+import { LayaAgent } from "./agent.ts";
+import type { Runner } from "./agent.ts";
+import { LayaTokenizer } from "./tokenizer.ts";
+import type { TokenizerConfig, TokenizerJson } from "./tokenizer.ts";
+import type { AgentConfig, Batch, RunnerOutput } from "./types.ts";
+
+/**
+ * A minimal, valid batch (2 rows, length 8, 3 markers, one row per qtype family used here) used
+ * to probe a freshly created session before accepting its execution provider. Token/marker
+ * values are arbitrary (pad id 0, marker positions 1-3) — the graph does not care what they are,
+ * only that the shapes are valid and more than one row/qtype is exercised.
+ *
+ * This only proves the provider can execute the graph at all (session creation succeeds and a
+ * `run()` returns finite-shaped output) for this one shape; it is not a numerical-correctness
+ * check, and it does not cover every shape `agent.predict()` can produce (variable sequence
+ * length, marker count, batch size). The browser parity e2e test (apps/demo/e2e/parity.spec.ts),
+ * which replays real fixture data end to end, is the real correctness gate.
+ */
+function probeBatch(): Batch {
+  return {
+    rows: 2,
+    length: 8,
+    markers: 3,
+    inputIds: new BigInt64Array(16).fill(0n),
+    attentionMask: new BigInt64Array(16).fill(1n),
+    markerPos: BigInt64Array.from([1n, 2n, 3n, 1n, 2n, 3n]),
+    markerMask: Uint8Array.from([1, 1, 1, 1, 1, 1]),
+    qtype: BigInt64Array.from([0n, 2n]),
+  };
+}
+
+export type Provider = "webgpu" | "wasm";
+
+export interface LoadProgress {
+  file: string;
+  received: number;
+  total: number | null;
+}
+
+export interface LoadOptions {
+  /** Execution providers to try in order. Defaults to ["webgpu", "wasm"]. */
+  providers?: Provider[];
+  /** Cache API bucket for model.onnx; null disables caching. Defaults to "laya-models". */
+  cacheName?: string | null;
+  onProgress?: (progress: LoadProgress) => void;
+  batchSize?: number;
+  /** Where onnxruntime-web finds its .wasm/.mjs files; required when they are not next to the page. */
+  wasmPaths?: string;
+}
+
+export interface OnnxConfig {
+  format: "laya-onnx";
+  format_version: number;
+  dtype: "float32" | "float16";
+  opset: number;
+  inputs: string[];
+  outputs: string[];
+}
+
+export interface Bundle {
+  baseUrl: string;
+  config: AgentConfig;
+  onnxConfig: OnnxConfig;
+  tokenizerJson: TokenizerJson;
+  tokenizerConfig: TokenizerConfig;
+  model: ArrayBuffer;
+}
+
+const join = (base: string, name: string) => (base.endsWith("/") ? base : base + "/") + name;
+
+async function fetchJson<T>(url: string): Promise<T> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Failed to fetch ${url}: ${response.status}`);
+  return (await response.json()) as T;
+}
+
+/** Fetch a large file with progress; caches the bytes when a cache name is given and storage allows it. */
+async function fetchBytes(
+  url: string,
+  cacheName: string | null,
+  onProgress: LoadOptions["onProgress"],
+): Promise<ArrayBuffer> {
+  let cache: Cache | null = null;
+  if (cacheName !== null && typeof caches !== "undefined") {
+    try {
+      cache = await caches.open(cacheName);
+      const hit = await cache.match(url);
+      if (hit) {
+        const bytes = await hit.arrayBuffer();
+        onProgress?.({ file: url, received: bytes.byteLength, total: bytes.byteLength });
+        return bytes;
+      }
+    } catch {
+      cache = null;
+    }
+  }
+  const response = await fetch(url);
+  if (!response.ok || !response.body) throw new Error(`Failed to fetch ${url}: ${response.status}`);
+  const total = Number(response.headers.get("content-length")) || null;
+  const reader = response.body.getReader();
+  // Annotated as `Uint8Array<ArrayBuffer>`, not the bare `Uint8Array` (which TS now widens to
+  // `Uint8Array<ArrayBufferLike>`, including `SharedArrayBuffer`), so `.buffer` below stays an
+  // `ArrayBuffer` and this can be passed to `Response`/`fetchBytes`'s own `ArrayBuffer` return type.
+  let bytes: Uint8Array<ArrayBuffer>;
+  let received = 0;
+  if (total !== null) {
+    // Preallocate the full buffer up front instead of accumulating a chunk list: one allocation
+    // for the whole download keeps peak memory during fetch at ~1x the model size (ORT still
+    // makes its own copy when it loads the buffer into a session).
+    bytes = new Uint8Array(total);
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (received + value.byteLength > total) {
+        throw new Error("Response longer than Content-Length");
+      }
+      bytes.set(value, received);
+      received += value.byteLength;
+      onProgress?.({ file: url, received, total });
+    }
+  } else {
+    const chunks: Uint8Array[] = [];
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.byteLength;
+      onProgress?.({ file: url, received, total });
+    }
+    bytes = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+  }
+  // A short read (stream ended before `total` bytes arrived) is a corrupt download, not a
+  // smaller-than-declared one — never accept it, and never cache it as if it were complete.
+  if (total !== null && received !== total) {
+    throw new Error(`Truncated download: received ${received} of ${total} bytes from ${url}`);
+  }
+  if (cache) {
+    try {
+      await cache.put(
+        url,
+        new Response(bytes.subarray(0, received), {
+          headers: {
+            "content-length": String(received),
+            "content-type": "application/octet-stream",
+          },
+        }),
+      );
+    } catch {
+      // Quota exceeded or storage disabled: the model still runs, it is just fetched again next time.
+    }
+  }
+  // `bytes` is already sized to exactly `received` bytes in both branches: the truncation check
+  // above guarantees `received === total` (and therefore `=== bytes.byteLength`) whenever `total`
+  // was known, and the unknown-length branch always allocates exactly `received` bytes.
+  return received === bytes.byteLength ? bytes.buffer : bytes.buffer.slice(0, received);
+}
+
+/** Download every file of a `laya-mlx export-onnx` bundle from a directory URL. */
+export async function loadBundle(baseUrl: string, options: LoadOptions = {}): Promise<Bundle> {
+  const cacheName = options.cacheName === undefined ? "laya-models" : options.cacheName;
+  const [config, onnxConfig, tokenizerJson, tokenizerConfig] = await Promise.all([
+    fetchJson<AgentConfig>(join(baseUrl, "rl_agent_config.json")),
+    fetchJson<OnnxConfig>(join(baseUrl, "onnx_config.json")),
+    fetchJson<TokenizerJson>(join(baseUrl, "tokenizer/tokenizer.json")),
+    fetchJson<TokenizerConfig>(join(baseUrl, "tokenizer/tokenizer_config.json")),
+  ]);
+  if (onnxConfig.format !== "laya-onnx") throw new Error(`Not a Laya ONNX bundle: ${baseUrl}`);
+  const model = await fetchBytes(join(baseUrl, "model.onnx"), cacheName, options.onProgress);
+  return { baseUrl, config, onnxConfig, tokenizerJson, tokenizerConfig, model };
+}
+
+/** Runs a Laya ONNX graph through onnxruntime-web. */
+export class OnnxRunner implements Runner {
+  readonly session: ort.InferenceSession;
+  readonly provider: Provider;
+
+  private constructor(session: ort.InferenceSession, provider: Provider) {
+    this.session = session;
+    this.provider = provider;
+  }
+
+  static async create(model: ArrayBuffer, options: LoadOptions = {}): Promise<OnnxRunner> {
+    if (options.wasmPaths) ort.env.wasm.wasmPaths = options.wasmPaths;
+    const providers = options.providers ?? ["webgpu", "wasm"];
+    const attempts: { provider: Provider; error: unknown }[] = [];
+    for (const provider of providers) {
+      // `navigator` does not exist in Node, where the wasm provider is smoke-tested.
+      if (provider === "webgpu" && (typeof navigator === "undefined" || !("gpu" in navigator))) {
+        attempts.push({ provider, error: "unavailable (navigator.gpu missing)" });
+        continue;
+      }
+      let session: ort.InferenceSession | undefined;
+      try {
+        session = await ort.InferenceSession.create(model, {
+          executionProviders: [provider],
+          // The "extended"/"all" graph transformations include a SkipLayerNormalization fusion
+          // that onnxruntime-web's WebGPU (JSEP) kernel cannot run against this checkpoint's
+          // fp16 weights ("Error: Beta must be 1D", reproduced with a 1-row synthetic batch
+          // regardless of input shape); "basic" skips that fusion and runs correctly. wasm is
+          // unaffected, so it keeps the full optimization level. This pins the exact
+          // onnxruntime-web version (see package.json) so the workaround does not silently stop
+          // applying (or become unnecessary) under a caret range.
+          //
+          // Upstream: microsoft/onnxruntime#27455 (closed by #27459, merged 2026-02-26)
+          // describes the same failure mode — SkipLayerNormFusion applied when gamma/beta are
+          // not 1D — on the CPU EP; that fix shipped well before onnxruntime-web 1.30.0
+          // (released 2026-09-14), but our failure still reproduces on the WebGPU (JSEP) EP, so
+          // this looks like a residual/JSEP-specific case of the same root cause (the PR's own
+          // fusion check falls back to "allow fusion" when static shape info is unavailable) or
+          // a separate JSEP kernel bug, rather than a regression that fix should have caught. No
+          // WebGPU-specific issue found as of 2026-09-20; re-test when upgrading.
+          graphOptimizationLevel: provider === "webgpu" ? "basic" : "all",
+        });
+        const runner = new OnnxRunner(session, provider);
+        // `InferenceSession.create` only validates the graph; it does not catch every backend
+        // problem (see the WebGPU note above, which surfaces on the first `run`, not here). Probe
+        // with a tiny synthetic batch through the real `run` code path before accepting this
+        // provider; this also front-loads WebGPU shader compilation for this shape, so the probe
+        // itself is not wasted work.
+        await runner.run(probeBatch());
+        return runner;
+      } catch (error) {
+        attempts.push({ provider, error });
+        if (session) await session.release().catch(() => {});
+      }
+    }
+    throw new Error(
+      `No execution provider could load the model: ${attempts.map((a) => `${a.provider}: ${String(a.error)}`).join("; ")}`,
+      { cause: attempts.at(-1)?.error },
+    );
+  }
+
+  async run(batch: Batch): Promise<RunnerOutput> {
+    const feeds = {
+      input_ids: new ort.Tensor("int64", batch.inputIds, [batch.rows, batch.length]),
+      attention_mask: new ort.Tensor("int64", batch.attentionMask, [batch.rows, batch.length]),
+      marker_pos: new ort.Tensor("int64", batch.markerPos, [batch.rows, batch.markers]),
+      marker_mask: new ort.Tensor("bool", batch.markerMask, [batch.rows, batch.markers]),
+      qtype: new ort.Tensor("int64", batch.qtype, [batch.rows]),
+    };
+    const output = await this.session.run(feeds);
+    const logits = output["logits"];
+    const actLogits = output["act_logits"];
+    if (!logits || !actLogits) {
+      throw new Error("ONNX graph did not return logits/act_logits");
+    }
+    if (logits.dims[0] !== batch.rows) {
+      throw new Error(
+        `ONNX graph returned logits for ${logits.dims[0]} rows, expected ${batch.rows}`,
+      );
+    }
+    return {
+      rows: batch.rows,
+      markers: Number(logits.dims[1]),
+      actions: Number(actLogits.dims[1]),
+      // `Tensor.data` is typed by element type (`Tensor.DataTypeMap['float32']`), which is
+      // already `Float32Array`; the cast is only to narrow away the wider `Tensor.DataType`
+      // union that `output[key]`'s untyped `Tensor` carries.
+      logits: logits.data as Float32Array,
+      actLogits: actLogits.data as Float32Array,
+    };
+  }
+}
+
+export interface LoadedAgent {
+  agent: LayaAgent;
+  /** `Bundle` minus `model`: the up-to-647 MB model buffer is not handed back, see below. */
+  bundle: Omit<Bundle, "model">;
+  provider: Provider;
+}
+
+/** One call from bundle URL to a ready agent; what the demos use. */
+export async function loadAgent(baseUrl: string, options: LoadOptions = {}): Promise<LoadedAgent> {
+  const bundle = await loadBundle(baseUrl, options);
+  const runner = await OnnxRunner.create(bundle.model, options);
+  const tokenizer = new LayaTokenizer(bundle.tokenizerJson, bundle.tokenizerConfig);
+  const agent = new LayaAgent({
+    config: bundle.config,
+    tokenizer,
+    runner,
+    ...(options.batchSize ? { batchSize: options.batchSize } : {}),
+  });
+  // `OnnxRunner.create` (via `InferenceSession.create`) has already copied `bundle.model`'s bytes
+  // into the ORT session; drop the reference here instead of returning it to the caller, so the
+  // up-to-647 MB ArrayBuffer is not kept alive twice and can be garbage collected.
+  const { model: _model, ...bundleWithoutModel } = bundle;
+  return { agent, bundle: bundleWithoutModel, provider: runner.provider };
+}

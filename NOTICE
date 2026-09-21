@@ -25,6 +25,12 @@ ports. All of them are licensed under Apache-2.0.
    `web/packages/laya-web/src/{prompt,calibration,questions}.ts`, which are
    themselves a TypeScript port of Laya's `laya_mlx.common` / `laya_mlx.agent`.
 
+   `web/src/laya/vendor/*.ts` are unmodified copies of that fork's
+   `web/packages/laya-web/src/*.ts`, vendored because `@laya-mlx/web` is a
+   private workspace package with no npm release. `web/vite.config.ts` also
+   adapts that fork's plugin for dropping onnxruntime-web's unused wasm
+   fallback asset.
+
 Changes made in this repository (Apache-2.0 section 4(b)):
    - Reimplemented the above in Python against onnxruntime rather than MLX,
      Core ML or onnxruntime-web.
@@ -33,6 +39,8 @@ Changes made in this repository (Apache-2.0 section 4(b)):
      installed in a user site directory.
    - Dropped the parts not needed here: the language router, application
      presets, email helpers, retry and action-cost handling.
+   - Left the vendored TypeScript untouched; the browser app's own code lives
+     outside that directory.
 
 Model weights are downloaded separately from Hugging Face and are not included
 in this repository:
@@ -43,4 +51,4 @@ in this repository:
 ------------------------------------------------------------------------
 No other part of this repository is derived from the projects above. The nostr
 collection, the posting statistics, the question design, the evaluation against
-NIP-24 labels and the web page are original to this repository.
+NIP-24 labels and the web application are original to this repository.
