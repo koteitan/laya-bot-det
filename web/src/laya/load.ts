@@ -13,7 +13,14 @@ import { LayaAgent } from "./vendor/agent.ts";
 import { LayaTokenizer, type TokenizerConfig, type TokenizerJson } from "./vendor/tokenizer.ts";
 import { OnnxRunner, type OnnxConfig, type Provider } from "./vendor/session.ts";
 import type { AgentConfig } from "./vendor/types.ts";
-import { cachedBytes, downloadBytes, downloadJson, type Progress } from "./download.ts";
+import {
+  cachedBytes,
+  clearModelCache,
+  downloadBytes,
+  downloadJson,
+  pruneStaleChunks,
+  type Progress,
+} from "./download.ts";
 
 export const MODEL_URL = "https://huggingface.co/mizchi/laya-multilingual-onnx/resolve/main/";
 export const TOKENIZER_BYTES = 34_363_188;
@@ -43,6 +50,9 @@ export async function load(
   let phase: Phase = "config";
   let received = 0;
   try {
+    // Entries from an earlier chunk size can never be read again; reclaim them
+    // before asking the browser for several hundred more MB.
+    await pruneStaleChunks();
     onProgress("config", 0, TOKENIZER_BYTES);
     // The tokenizer is 34 MB and goes through the same resumable path as the
     // model; the other three configs are a few hundred bytes each and only ride
@@ -94,6 +104,8 @@ export async function load(
 }
 
 export const hasWebGPU = (): boolean => "gpu" in navigator;
+
+export { clearModelCache };
 
 /** How much of the download a previous visit already paid for, across both big files. */
 export async function cachedProgress(): Promise<{ received: number; total: number }> {

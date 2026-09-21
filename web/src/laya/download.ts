@@ -29,7 +29,15 @@ export interface Progress {
   total: number;
 }
 
-const chunkKey = (url: string, start: number): string => `${url}?chunk=${start}`;
+/** The key names the exact byte range, not just its start.
+ *
+ *  Keying on the start alone ties the cache to whatever CHUNK_BYTES happened to
+ *  be when it was written: shrinking chunks from 16 MB to 8 MB left the old
+ *  16 MB body sitting at `?chunk=0`, where the new loop read it as if it were
+ *  8 MB and counted 8 MB too many. Naming both ends means an entry written
+ *  under a different chunk size simply misses, and is refetched. */
+const chunkKey = (url: string, start: number, end: number): string =>
+  `${url}?chunk=${start}-${end}`;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -87,17 +95,28 @@ export async function downloadBytes(
 
   for (let start = 0; start < total; start += CHUNK_BYTES) {
     const end = Math.min(start + CHUNK_BYTES, total) - 1;
-    const key = chunkKey(url, start);
-    let response = cache ? await cache.match(key).catch(() => undefined) : undefined;
-    if (!response) {
-      response = await fetchChunk(url, start, end);
+    const want = end - start + 1;
+    const key = chunkKey(url, start, end);
+
+    let buffer: ArrayBuffer | null = null;
+    const hit = cache ? await cache.match(key).catch(() => undefined) : undefined;
+    if (hit) {
+      const cached = await hit.arrayBuffer();
+      // Never trust a cached body's length. A wrong one here would either
+      // overrun `bytes.set` or silently miscount, and refetching is cheap
+      // next to either.
+      if (cached.byteLength === want) buffer = cached;
+      else await cache?.delete(key).catch(() => undefined);
+    }
+    if (!buffer) {
+      const response = await fetchChunk(url, start, end);
       if (cache) {
         // A chunk that cannot be stored is not worth failing over; it just costs
         // a refetch next time.
         await cache.put(key, response.clone()).catch(() => undefined);
       }
+      buffer = await response.arrayBuffer();
     }
-    const buffer = await response.arrayBuffer();
     bytes.set(new Uint8Array(buffer), start);
     received += buffer.byteLength;
     onProgress?.({ received, total });
@@ -123,13 +142,38 @@ export async function cachedBytes(url: string): Promise<number> {
     let received = 0;
     for (const request of await cache.keys()) {
       if (!request.url.startsWith(prefix)) continue;
-      const hit = await cache.match(request);
-      received += Number(hit?.headers.get("content-length")) || 0;
+      // Read the size from the key rather than the stored body, so a stale
+      // entry cannot inflate the figure the UI shows.
+      const [start, end] = request.url.slice(prefix.length).split("-").map(Number);
+      if (Number.isFinite(start) && Number.isFinite(end)) received += end - start + 1;
     }
     return received;
   } catch {
     return 0;
   }
+}
+
+/** Drop chunk entries written under the older `?chunk=<start>` key.
+ *
+ *  Those are unreachable now that keys name both ends of the range, so they
+ *  would sit there holding a few hundred MB that nothing can ever read. */
+export async function pruneStaleChunks(): Promise<number> {
+  const cache = await openCache();
+  if (!cache) return 0;
+  let dropped = 0;
+  try {
+    for (const request of await cache.keys()) {
+      const query = new URL(request.url).search;
+      const match = /^\?chunk=(.*)$/.exec(query);
+      if (match && !match[1]!.includes("-")) {
+        await cache.delete(request).catch(() => undefined);
+        dropped++;
+      }
+    }
+  } catch {
+    // Storage blocked; there is nothing to prune.
+  }
+  return dropped;
 }
 
 export async function clearModelCache(): Promise<void> {
