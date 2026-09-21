@@ -245,6 +245,19 @@ export async function downloadJson<T>(
   return JSON.parse(new TextDecoder().decode(bytes)) as T;
 }
 
+/** Bytes of `url` already in the cache, following a parts manifest when there
+ *  is one -- a split bundle caches its parts under their own names, so asking
+ *  about model.onnx alone reports nothing and tells the person the download is
+ *  still ahead of them when it is not. */
+export async function cachedBundleBytes(url: string): Promise<number> {
+  const manifest = await manifestFor(url);
+  if (!manifest) return cachedBytes(url);
+  const base = url.slice(0, url.lastIndexOf("/") + 1);
+  let total = 0;
+  for (const part of manifest.parts) total += await cachedBytes(base + part.name);
+  return total;
+}
+
 /** Bytes of `url` already in the cache, so the UI can say what a fresh attempt costs. */
 export async function cachedBytes(url: string): Promise<number> {
   const cache = await openCache();

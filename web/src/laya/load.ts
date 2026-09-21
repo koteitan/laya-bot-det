@@ -17,6 +17,7 @@ import { DirectRunner, type OptLevel } from "./runner.ts";
 import type { AgentConfig } from "./vendor/types.ts";
 import { mark } from "./trace.ts";
 import {
+  cachedBundleBytes,
   cachedBytes,
   clearModelCache,
   downloadBytes,
@@ -220,7 +221,7 @@ async function bundleBytes(): Promise<number> {
 /** How much of the download a previous visit already paid for. */
 export async function cachedProgress(): Promise<{ received: number; total: number }> {
   const [model, tokenizer, total] = await Promise.all([
-    cachedBytes(MODEL_FILE),
+    cachedBundleBytes(MODEL_FILE),
     cachedBytes(TOKENIZER_FILE),
     bundleBytes(),
   ]);
