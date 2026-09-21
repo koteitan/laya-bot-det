@@ -27,6 +27,8 @@ h1 { margin: 0; font-size: 18px; letter-spacing: .02em; }
 .summary { margin: 4px 0 0; color: var(--dim); font-size: 13px; }
 .laya-status { margin: 6px 0 0; font-size: 13px; color: var(--dim); }
 .laya-status.error { color: var(--bot); }
+.warn { display: block; margin-bottom: 4px; }
+.warn.fatal { color: var(--bot); }
 .laya-status button {
   background: var(--card); color: var(--fg); border: 1px solid var(--line);
   border-radius: 5px; padding: 3px 10px; cursor: pointer; font-size: 13px;

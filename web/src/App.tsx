@@ -17,6 +17,7 @@ import {
 import { decodeNpub, encodeNpub } from "./nostr/nip19.ts";
 import { features, heuristicScore, type Note } from "./detect/features.ts";
 import { buildState, combinedScore, QUESTIONS } from "./detect/questions.ts";
+import { memoryWarning } from "./laya/capability.ts";
 import {
   cachedProgress,
   clearModelCache,
@@ -324,16 +325,22 @@ function LayaStatus({
   onStart: () => void;
   onClear: () => void;
 }) {
+  const warning = memoryWarning();
   if (state.kind === "idle") {
     return (
       <p className="laya-status">
+        {warning ? (
+          <span className={warning.fatal ? "warn fatal" : "warn"}>{warning.text}</span>
+        ) : null}
         いまは<b>統計のみ</b>で判定中。
         {state.cached >= state.total
           ? "Laya はキャッシュ済みなので、ダウンロードなしで使えます。"
           : state.cached > 0
             ? `Laya は ${MB(state.cached)} / ${MB(state.total)} MB までキャッシュ済み。続きから再開します。`
             : `Laya を足すには ${MB(state.total)} MB のダウンロードが要ります（初回だけ）。`}{" "}
-        <button onClick={onStart}>Laya を読み込む</button>
+        <button onClick={onStart}>
+          {warning?.fatal ? "それでも Laya を読み込む" : "Laya を読み込む"}
+        </button>
         {state.cached > 0 ? <button onClick={onClear}>キャッシュを消す</button> : null}
         {!hasWebGPU() ? " ※ WebGPU が無いので WASM で動きます（かなり遅い）" : null}
       </p>
