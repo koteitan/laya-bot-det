@@ -42,9 +42,15 @@ POST_LIMIT = 12
 POST_CHARS = 140
 PROFILE_CHARS = 200
 
-# Fitted on the 39 labelled accounts described above; no held-out set behind them.
+# Fitted on the 39 labelled accounts described above; no held-out set behind it.
 LAYA_WEIGHT = 0.5
-BOT_THRESHOLD = 0.40
+
+# Measured on the 5,080-note snapshot. The earlier 0.40 maximised balanced
+# accuracy on a label set that runs 31 bots to 8 humans, which pulled it far
+# below anything a real population wants: it called 56% of authors bots, against
+# 13% at 0.63. The label set is not a sample of nostr, so its optimum is not the
+# population's optimum. The page exposes this as a slider for the same reason.
+BOT_THRESHOLD = 0.63
 
 WS_RE = re.compile(r"\s+")
 
