@@ -46,6 +46,8 @@ export const MODEL_URL = ((): string => {
 
 export const usingCustomModel = (): boolean => MODEL_URL !== DEFAULT_MODEL_URL;
 export const TOKENIZER_BYTES = 34_363_188;
+/** The default bundle's size. A bundle named by `?model=` reports its own,
+ *  so the progress bar follows what is actually being fetched. */
 export const MODEL_BYTES = 646_870_871;
 
 const MODEL_FILE = MODEL_URL + "model.onnx";

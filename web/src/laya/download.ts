@@ -56,19 +56,68 @@ async function openCache(timeoutMs = 3000): Promise<Cache | null> {
   }
 }
 
-async function totalBytes(url: string): Promise<number> {
-  // A HEAD would be cheaper, but the CDN redirect chain answers it inconsistently;
-  // a one-byte ranged GET always comes back with a Content-Range to read.
+interface Probe {
+  total: number;
+  /** Whether the host answered a ranged request with 206. GitHub Pages does
+   *  not: it ignores the header and returns the whole file with 200, which
+   *  would make every chunk request fetch the entire file. */
+  ranged: boolean;
+}
+
+async function probe(url: string): Promise<Probe> {
+  // A HEAD would be cheaper, but redirect chains answer it inconsistently;
+  // a one-byte ranged GET reports both the size and whether Range works.
   const response = await fetch(url, { headers: { Range: "bytes=0-0" } });
   if (!response.ok) throw new Error(`Failed to size ${url}: HTTP ${response.status}`);
   const range = response.headers.get("content-range");
-  const total = range
-    ? Number(range.split("/")[1])
+  const ranged = response.status === 206 && !!range;
+  const total = ranged
+    ? Number(range!.split("/")[1])
     : Number(response.headers.get("content-length"));
   if (!Number.isFinite(total) || total <= 0) {
     throw new Error(`Could not determine the size of ${url}`);
   }
-  return total;
+  return { total, ranged };
+}
+
+/** Whole file in one request, for hosts that ignore Range.
+ *  Resumability then comes from the bundle being split into parts, each
+ *  cached on its own -- a dropped connection costs one part, not the lot. */
+async function downloadWhole(
+  url: string,
+  total: number,
+  cache: Cache | null,
+  onProgress?: (p: Progress) => void,
+): Promise<ArrayBuffer> {
+  const hit = cache ? await cache.match(url).catch(() => undefined) : undefined;
+  if (hit) {
+    const cached = await hit.arrayBuffer();
+    if (cached.byteLength === total) {
+      onProgress?.({ received: total, total });
+      return cached;
+    }
+    await cache?.delete(url).catch(() => undefined);
+  }
+  const response = await fetch(url);
+  if (!response.ok || !response.body) {
+    throw new Error(`Failed to fetch ${url}: HTTP ${response.status}`);
+  }
+  const bytes = new Uint8Array(total);
+  let received = 0;
+  const reader = response.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (received + value.byteLength > total) throw new Error(`${url}: longer than declared`);
+    bytes.set(value, received);
+    received += value.byteLength;
+    onProgress?.({ received, total });
+  }
+  if (received !== total) {
+    throw new Error(`Truncated: received ${received} of ${total} bytes from ${url}`);
+  }
+  if (cache) await cache.put(url, new Response(bytes)).catch(() => undefined);
+  return bytes.buffer;
 }
 
 async function fetchChunk(url: string, start: number, end: number): Promise<Response> {
@@ -96,12 +145,63 @@ async function fetchChunk(url: string, start: number, end: number): Promise<Resp
   );
 }
 
+interface PartsManifest {
+  file: string;
+  size: number;
+  sha256?: string;
+  parts: { name: string; size: number }[];
+}
+
+/** A `<file>.parts.json` next to the file means it was split to get under a
+ *  host's per-file limit -- GitHub's is 100 MB, and the model is 325 MB. */
+async function manifestFor(url: string): Promise<PartsManifest | null> {
+  try {
+    const response = await fetch(url + ".parts.json");
+    if (!response.ok) return null;
+    const manifest = (await response.json()) as PartsManifest;
+    return Array.isArray(manifest.parts) && manifest.parts.length ? manifest : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function downloadBytes(
   url: string,
   onProgress?: (p: Progress) => void,
 ): Promise<ArrayBuffer> {
+  const manifest = await manifestFor(url);
+  if (manifest) {
+    // Each part still goes through the ranged, cached path below, so a split
+    // bundle resumes exactly like a whole one.
+    const bytes = new Uint8Array(manifest.size);
+    const base = url.slice(0, url.lastIndexOf("/") + 1);
+    let written = 0;
+    for (const part of manifest.parts) {
+      const piece = await downloadOne(base + part.name, (p) =>
+        onProgress?.({ received: written + p.received, total: manifest.size }),
+      );
+      if (piece.byteLength !== part.size) {
+        throw new Error(`${part.name}: ${piece.byteLength} bytes, expected ${part.size}`);
+      }
+      bytes.set(new Uint8Array(piece), written);
+      written += piece.byteLength;
+    }
+    if (written !== manifest.size) {
+      throw new Error(`Assembled ${written} of ${manifest.size} bytes from ${manifest.parts.length} parts`);
+    }
+    return bytes.buffer;
+  }
+  return downloadOne(url, onProgress);
+}
+
+async function downloadOne(
+  url: string,
+  onProgress?: (p: Progress) => void,
+): Promise<ArrayBuffer> {
   const cache = await openCache();
-  const total = await totalBytes(url);
+  const { total, ranged } = await probe(url);
+  if (!ranged) return downloadWhole(url, total, cache, onProgress);
+
   const bytes = new Uint8Array(total);
   let received = 0;
 
@@ -150,6 +250,8 @@ export async function cachedBytes(url: string): Promise<number> {
   const cache = await openCache();
   if (!cache) return 0;
   try {
+    const whole = await cache.match(url).catch(() => undefined);
+    if (whole) return Number(whole.headers.get("content-length")) || 0;
     const prefix = `${url}?chunk=`;
     let received = 0;
     for (const request of await cache.keys()) {

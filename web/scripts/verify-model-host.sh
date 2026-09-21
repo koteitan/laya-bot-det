@@ -30,8 +30,18 @@ case "$BASE" in
   *) echo "HTTPS ではありません。ページが https なので混在コンテンツで弾かれます。"; fail=1 ;;
 esac
 
-for f in onnx_config.json rl_agent_config.json tokenizer/tokenizer_config.json \
-         tokenizer/tokenizer.json model.onnx; do
+# A split bundle has no model.onnx; it has parts named by the manifest. Small
+# files may answer a range with 200 simply because it covers the whole file,
+# so only the big ones say anything useful about Range support.
+if curl -sfI "${BASE}model.onnx.parts.json" >/dev/null 2>&1; then
+  echo "分割バンドル (model.onnx.parts.json あり)"
+  FILES="onnx_config.json rl_agent_config.json tokenizer/tokenizer_config.json \
+         tokenizer/tokenizer.json model.onnx.parts.json model.onnx.000"
+else
+  FILES="onnx_config.json rl_agent_config.json tokenizer/tokenizer_config.json \
+         tokenizer/tokenizer.json model.onnx"
+fi
+for f in $FILES; do
   check "$f" "$BASE$f"
 done
 
