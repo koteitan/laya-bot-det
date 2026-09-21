@@ -26,7 +26,9 @@ import {
   hasWebGPU,
   load,
   MODEL_BYTES,
+  MODEL_URL,
   TOKENIZER_BYTES,
+  usingCustomModel,
   type Phase,
 } from "./laya/load.ts";
 import type { LayaAgent } from "./laya/vendor/agent.ts";
@@ -381,6 +383,7 @@ function LayaStatus({
         {warning ? (
           <span className={warning.fatal ? "warn fatal" : "warn"}>{warning.text}</span>
         ) : null}
+        {usingCustomModel() ? <span className="warn">モデル: {MODEL_URL}</span> : null}
         いまは<b>統計のみ</b>で判定中。
         {state.cached >= state.total
           ? "Laya はキャッシュ済みなので、ダウンロードなしで使えます。"

@@ -24,7 +24,27 @@ import {
   type Progress,
 } from "./download.ts";
 
-export const MODEL_URL = "https://huggingface.co/mizchi/laya-multilingual-onnx/resolve/main/";
+const DEFAULT_MODEL_URL = "https://huggingface.co/mizchi/laya-multilingual-onnx/resolve/main/";
+
+/** `?model=<base-url>` points the loader at another bundle.
+ *
+ *  A host has to satisfy three things at once -- HTTPS, CORS, and Range --
+ *  and whether it does is only knowable by trying. Making the URL a parameter
+ *  means a candidate can be tested from a phone without a redeploy, and an
+ *  int8 bundle can be tried without committing to shipping it. */
+export const MODEL_URL = ((): string => {
+  const given = new URLSearchParams(location.search).get("model");
+  if (!given) return DEFAULT_MODEL_URL;
+  try {
+    const url = new URL(given, location.href);
+    if (url.protocol !== "https:") return DEFAULT_MODEL_URL;
+    return url.href.endsWith("/") ? url.href : url.href + "/";
+  } catch {
+    return DEFAULT_MODEL_URL;
+  }
+})();
+
+export const usingCustomModel = (): boolean => MODEL_URL !== DEFAULT_MODEL_URL;
 export const TOKENIZER_BYTES = 34_363_188;
 export const MODEL_BYTES = 646_870_871;
 
@@ -52,7 +72,7 @@ export async function load(
   let phase: Phase = "config";
   let received = 0;
   try {
-    mark("load:start", navigator.userAgent.slice(0, 120));
+    mark("load:start", `${MODEL_URL} | ${navigator.userAgent.slice(0, 90)}`);
     // Entries from an earlier chunk size can never be read again; reclaim them
     // before asking the browser for several hundred more MB.
     await pruneStaleChunks();
