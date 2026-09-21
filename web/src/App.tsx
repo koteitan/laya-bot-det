@@ -59,6 +59,7 @@ export function App() {
   // A run that never reached "done" left its marks behind; show them, since the
   // crash took the console with it.
   const [showTrace, setShowTrace] = useState(() => crashed());
+  const [traceMarks, setTraceMarks] = useState(() => trace());
   // `?diag` exercises onnxruntime on a 106-byte model through this same bundle.
   const [diag, setDiag] = useState<SelfTestResult[] | "running" | null>(null);
   const showDiag = new URLSearchParams(location.search).has("diag");
@@ -254,6 +255,10 @@ export function App() {
           received: f.received ?? 0,
           message: f.message ?? String(e),
         });
+        // The marks explaining this failure were written moments ago; show them
+        // without waiting for a reload.
+        setTraceMarks(trace());
+        setShowTrace(true);
       });
   }, []);
 
@@ -342,10 +347,16 @@ export function App() {
       ) : null}
       {showTrace ? (
         <pre className="trace">
-          {"前回の読み込みは最後まで到達していません。ここで止まりました:\n\n"}
-          {format(trace())}
+          {`足跡 (${traceMarks.length} 件):\n\n`}
+          {format(traceMarks)}
           {"\n\n"}
-          <button onClick={() => { clearTrace(); setShowTrace(false); }}>この記録を消す</button>
+          {/* Read on demand. Marks written after this component mounted are not
+              picked up by a render that happens to be caused by something else,
+              and the marks worth reading are exactly the ones written last. */}
+          <button onClick={() => setTraceMarks(trace())}>最新にする</button>{" "}
+          <button onClick={() => { clearTrace(); setTraceMarks([]); setShowTrace(false); }}>
+            消す
+          </button>
         </pre>
       ) : null}
       <main>
