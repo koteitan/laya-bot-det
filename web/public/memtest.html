@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>memtest — laya-bot-det</title>
+<style>
+  :root { color-scheme: dark; background:#1a1a1a; color:#d4d4d4; }
+  body { margin:0; padding:20px 16px; font-family:system-ui,"Hiragino Sans",sans-serif; line-height:1.8; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  p { margin:6px 0; font-size:14px; }
+  .dim { color:#8a8a8a; font-size:13px; }
+  .big { font-size:34px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .ok { color:#5aa9e0; } .bad { color:#e0685a; }
+  button { background:#232323; color:#d4d4d4; border:1px solid #343434; border-radius:6px;
+           padding:10px 16px; font-size:15px; cursor:pointer; margin:4px 4px 4px 0; }
+  #log { font-family:ui-monospace,monospace; font-size:12px; color:#8a8a8a;
+         white-space:pre-wrap; margin-top:12px; }
+  .box { border:1px solid #343434; border-radius:8px; padding:12px; margin:12px 0; background:#232323; }
+</style>
+</head>
+<body>
+<h1>memtest</h1>
+<p class="dim">このブラウザが JS のバッファをどこまで確保できるかを測ります。
+Laya (int8) を動かすには <b>約 800 MB</b>、fp16 なら <b>約 1.3 GB</b> 必要です。</p>
+
+<div class="box">
+  <div class="dim">前回このブラウザが到達した最大値</div>
+  <div class="big" id="best">—</div>
+  <div class="dim" id="verdict"></div>
+</div>
+
+<p>
+  <button id="run">測定する</button>
+  <button id="reset">記録を消す</button>
+</p>
+<p class="dim">タブが落ちたら、それが上限です。落ちても記録は残るので、
+<b>開き直してこのページに戻ってきてください</b>。上に最大値が出ます。</p>
+
+<div id="log"></div>
+
+<script>
+// 確保のたびに到達点を localStorage へ書く。タブが殺されると JS の状態は消えるが、
+// localStorage は残る。そこが測定結果の保存先になる。
+var KEY = "laya-memtest-best";
+var STEP = 64 * 1024 * 1024;
+var LIMIT = 2048 * 1024 * 1024;
+var MB = function (n) { return Math.round(n / 1048576); };
+
+var bestEl = document.getElementById("best");
+var verdictEl = document.getElementById("verdict");
+var logEl = document.getElementById("log");
+
+function read() { try { return Number(localStorage.getItem(KEY)) || 0; } catch (e) { return 0; } }
+function write(v) { try { localStorage.setItem(KEY, String(v)); } catch (e) {} }
+
+function show() {
+  var best = read();
+  bestEl.textContent = best ? MB(best) + " MB" : "—";
+  if (!best) { verdictEl.textContent = ""; return; }
+  var int8 = best >= 800 * 1048576, fp16 = best >= 1300 * 1048576;
+  verdictEl.innerHTML =
+    '<span class="' + (int8 ? "ok" : "bad") + '">int8 (約800MB): ' + (int8 ? "足りる" : "足りない") + "</span> ・ " +
+    '<span class="' + (fp16 ? "ok" : "bad") + '">fp16 (約1.3GB): ' + (fp16 ? "足りる" : "足りない") + "</span>";
+}
+
+function log(s) { logEl.textContent += s + "\n"; }
+
+document.getElementById("reset").onclick = function () {
+  try { localStorage.removeItem(KEY); } catch (e) {}
+  logEl.textContent = ""; show();
+};
+
+document.getElementById("run").onclick = function () {
+  this.disabled = true;
+  logEl.textContent = "";
+  var held = [], total = 0;
+  function step() {
+    if (total >= LIMIT) { log("上限 " + MB(LIMIT) + " MB まで到達。ここで停止。"); return; }
+    try {
+      var b = new Uint8Array(STEP);
+      // 確保しただけでは OS が実メモリを割り当てないことがある。全ページに触れて
+      // 実際にコミットさせないと、測っているものが意味を持たない。
+      for (var i = 0; i < b.length; i += 4096) b[i] = 1;
+      held.push(b);
+      total += STEP;
+      write(total);              // 次の確保で落ちる前に記録する
+      log(MB(total) + " MB OK");
+      show();
+    } catch (e) {
+      log(MB(total + STEP) + " MB で失敗: " + e.name + " — ここが上限です");
+      return;
+    }
+    // 描画と localStorage の書き込みを挟むため、同期ループにしない
+    setTimeout(step, 60);
+  }
+  step();
+};
+
+show();
+</script>
+</body>
+</html>
