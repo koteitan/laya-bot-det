@@ -18,7 +18,6 @@ export interface Author {
   heuristic: Heuristic;
   laya: LayaVerdict | null;
   score: number;
-  samples: string[];
   lastSeen: number;
 }
 
@@ -45,33 +44,13 @@ function Avatar({ profile }: { profile: Profile | undefined }) {
   // rendered and the one in the document disagreeing, and the next update throws.
   if (!src || failed) return <div className="avatar" />;
   return (
-    <img
-      className="avatar"
-      src={src}
-      alt=""
-      loading="lazy"
-      onError={() => setFailed(true)}
-    />
+    <img className="avatar" src={src} alt="" loading="lazy" onError={() => setFailed(true)} />
   );
 }
 
-function Bar({ label, value, blue }: { label: string; value: number | null; blue?: boolean }) {
-  return (
-    <>
-      <span>{label}</span>
-      <span className={blue ? "bar blue" : "bar"}>
-        <span style={{ width: `${Math.min(Math.max(value ?? 0, 0), 1) * 100}%` }} />
-      </span>
-      <span className="num">{value === null ? "—" : value.toFixed(2)}</span>
-    </>
-  );
-}
+const n2 = (v: number | null | undefined): string => (v == null ? "—" : v.toFixed(2));
 
-export function AuthorCard({ a, threshold, showPosts }: {
-  a: Author;
-  threshold: number;
-  showPosts: boolean;
-}) {
+export function AuthorCard({ a, threshold }: { a: Author; threshold: number }) {
   const verdict = a.score >= threshold ? "bot" : "human";
   const name = a.profile?.display_name || a.profile?.name || a.npub.slice(0, 16) + "…";
   const f = a.features;
@@ -80,19 +59,24 @@ export function AuthorCard({ a, threshold, showPosts }: {
       <div className="top">
         <Avatar profile={a.profile} />
         <div className="who">
-          <div className="name">{name}</div>
-          <div className="npub">{a.npub}</div>
+          {/* The verdict sits on the name's line. Pushed to the far right it
+              was separated from the avatar and name by the full card width. */}
+          <div className="headline">
+            <span className="name">{name}</span>
+            <span className="tag">{verdict.toUpperCase()}</span>
+            <span className="score">{a.score.toFixed(2)}</span>
+          </div>
+          <div className="npub">
+            <a href={`https://nostx.io/${a.npub}`} target="_blank" rel="noreferrer">
+              {a.npub}
+            </a>
+          </div>
           {a.profile?.about ? <div className="about">{a.profile.about}</div> : null}
         </div>
-        <div className="verdict">
-          <div className="tag">{verdict.toUpperCase()}</div>
-          <div className="score">{a.score.toFixed(2)}</div>
-        </div>
       </div>
-      <div className="bars">
-        <Bar label="合成" value={a.score} />
-        <Bar label="Laya" value={a.laya?.pBot ?? null} blue />
-        <Bar label="統計" value={a.heuristic.score} />
+      <div className="scores">
+        合成 <b>{n2(a.score)}</b> ・ Laya <b>{n2(a.laya?.pBot)}</b> ・ 統計{" "}
+        <b>{n2(a.heuristic.score)}</b>
       </div>
       <div className="meta">
         {typeof a.profile?.bot === "boolean" ? (
@@ -102,22 +86,17 @@ export function AuthorCard({ a, threshold, showPosts }: {
         ) : null}
         {a.laya ? <span className="badge">{a.laya.category}</span> : null}
         <span>投稿 {f.posts}</span>
-        {a.laya ? <span>定型 {a.laya.templated.toFixed(2)}</span> : null}
-        {a.laya ? <span>会話 {a.laya.conversational.toFixed(2)}</span> : null}
-        {f.regularity !== null ? <span>間隔の規則性 {f.regularity.toFixed(2)}</span> : null}
+        {a.laya ? <span>定型 {n2(a.laya.templated)}</span> : null}
+        {a.laya ? <span>会話 {n2(a.laya.conversational)}</span> : null}
+        {f.regularity !== null ? <span>間隔の規則性 {n2(f.regularity)}</span> : null}
         {a.laya && a.laya.orderSpread > 0.15 ? (
-          <span title="選択肢の順番で答えが変わった量">順序差 {a.laya.orderSpread.toFixed(2)}</span>
+          <span title="選択肢の順番で答えが変わった量">順序差 {n2(a.laya.orderSpread)}</span>
         ) : null}
       </div>
       {a.heuristic.reasons.length ? (
         <ul className="reasons">
           {a.heuristic.reasons.map((r) => <li key={r}>{r}</li>)}
         </ul>
-      ) : null}
-      {showPosts ? (
-        <div className="posts">
-          {a.samples.slice(0, 3).map((s, i) => <div key={i}>· {s.slice(0, 120)}</div>)}
-        </div>
       ) : null}
     </article>
   );

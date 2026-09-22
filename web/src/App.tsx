@@ -46,7 +46,7 @@ const REBUILD_MS = 1000;
 type LayaState =
   | { kind: "idle"; cached: number; total: number }
   | { kind: "loading"; phase: Phase; received: number; total: number }
-  | { kind: "ready"; provider: string; judged: number }
+  | { kind: "ready"; provider: string; judged: number; totalMs: number }
   | { kind: "error"; phase: Phase; received: number; message: string };
 
 export function App() {
@@ -56,6 +56,9 @@ export function App() {
   const [authors, setAuthors] = useState<Author[]>([]);
   const [laya, setLaya] = useState<LayaState>({ kind: "idle", cached: 0, total: MODEL_BYTES + TOKENIZER_BYTES });
   const [noteCount, setNoteCount] = useState(0);
+  // How many authors have enough posts to be judged at all, so the progress
+  // reads as a fraction of the work rather than a bare count.
+  const [eligible, setEligible] = useState(0);
   // A run that never reached "done" left its marks behind; show them, since the
   // crash took the console with it.
   const [showTrace, setShowTrace] = useState(() => crashed());
@@ -132,11 +135,11 @@ export function App() {
           heuristic: h,
           laya: judged?.verdict ?? null,
           score: combinedScore(judged?.verdict.pBot ?? null, h.score),
-          samples: notes.map((n) => n.content),
           lastSeen: notes[0]?.created_at ?? 0,
         });
       }
       setNoteCount(total);
+      setEligible(rows.length);
       setAuthors(rows);
     }, REBUILD_MS);
     return () => clearInterval(id);
@@ -185,6 +188,7 @@ export function App() {
           continue;
         }
         const notes = notesRef.current.get(target)!;
+        const startedAt = performance.now();
         try {
           if (judgedRef.current.size === 0) mark("predict:first:before");
           const result = await agent.predict(buildState(notes, getProfile(target)), QUESTIONS);
@@ -202,7 +206,14 @@ export function App() {
               conversational: a.conversational?.type === "noul" ? a.conversational.noul : 0,
             },
           });
-          setLaya((s) => (s.kind === "ready" ? { ...s, judged: judgedRef.current.size } : s));
+          // Sum the predictions themselves rather than wall time, which would
+          // include the idle waits between having anything to judge.
+          const took = performance.now() - startedAt;
+          setLaya((s) =>
+            s.kind === "ready"
+              ? { ...s, judged: judgedRef.current.size, totalMs: s.totalMs + took }
+              : s,
+          );
         } catch {
           // One bad author must not stop the queue; mark it done and move on.
           judgedRef.current.set(target, {
@@ -245,7 +256,7 @@ export function App() {
       .then(({ agent, provider }) => {
         agentRef.current = agent;
         mark("done", provider);
-        setLaya({ kind: "ready", provider, judged: 0 });
+        setLaya({ kind: "ready", provider, judged: 0, totalMs: 0 });
       })
       .catch((e: unknown) => {
         const f = e as { phase?: Phase; received?: number; message?: string };
@@ -306,7 +317,7 @@ export function App() {
             : `${relays.source} / ${relays.read.length} リレー ・ ${noteCount} notes ・ ` +
               `${authors.length} authors ・ bot ${bots} (しきい値 ${settings.threshold.toFixed(2)})`}
         </p>
-        <LayaStatus state={laya} onStart={startLaya} onClear={clearLaya} />
+        <LayaStatus state={laya} onStart={startLaya} onClear={clearLaya} eligible={eligible} />
         <Menu
           open={menuOpen}
           onToggle={() => {
@@ -362,7 +373,7 @@ export function App() {
       ) : null}
       <main>
         {shown.map((a) => (
-          <AuthorCard key={a.pubkey} a={a} threshold={settings.threshold} showPosts={settings.showPosts} />
+          <AuthorCard key={a.pubkey} a={a} threshold={settings.threshold} />
         ))}
         {!shown.length ? (
           <p className="empty">
@@ -393,10 +404,12 @@ function LayaStatus({
   state,
   onStart,
   onClear,
+  eligible,
 }: {
   state: LayaState;
   onStart: () => void;
   onClear: () => void;
+  eligible: number;
 }) {
   const warning = memoryWarning();
   const forced = new URLSearchParams(location.search).has("force");
@@ -463,9 +476,11 @@ function LayaStatus({
       </p>
     );
   }
+  const rate = state.totalMs > 0 ? state.judged / (state.totalMs / 1000) : null;
   return (
     <p className="laya-status">
-      Laya 稼働中 ({state.provider}) ・ {state.judged} authors 判定済み
+      Laya 稼働中 ({state.provider}) ・ {eligible} 中 {state.judged} authors 判定済み
+      {rate !== null ? ` ・ ${rate.toFixed(1)} authors/s` : null}
     </p>
   );
 }

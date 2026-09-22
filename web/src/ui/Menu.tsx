@@ -66,14 +66,6 @@ export function Menu({ open, onToggle, settings, onChange, onClearCache, cachedP
           />
           過去の投稿も読む
         </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={settings.showPosts}
-            onChange={(e) => onChange({ showPosts: e.target.checked })}
-          />
-          投稿サンプルを表示
-        </label>
         <hr />
         <button className="linkish" onClick={onClearCache}>
           プロフィールのキャッシュを消す ({cachedProfiles})

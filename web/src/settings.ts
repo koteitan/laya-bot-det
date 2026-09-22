@@ -6,7 +6,6 @@ export interface Settings {
   sort: "score" | "laya" | "heuristic" | "posts" | "recent";
   filter: "all" | "bot" | "human" | "labelled" | "disagree";
   seed: boolean;
-  showPosts: boolean;
 }
 
 const KEY = "laya-bot-det:ui";
@@ -17,7 +16,6 @@ export const DEFAULTS: Settings = {
   sort: "score",
   filter: "all",
   seed: true,
-  showPosts: true,
 };
 
 export function loadSettings(): Settings {
