@@ -5,11 +5,12 @@ Jev と同じ System One 系のオープンウェイトモデル [Laya](https://
 ブラウザだけで動く版が https://koteitan.github.io/laya-bot-det/ にある。
 リレーから流れてくる kind:1 をその場で判定する。
 
-判定は2つのスコアの合成:
+判定は **Laya** だけで行う
+([`mizchi/laya-multilingual-onnx`](https://huggingface.co/mizchi/laya-multilingual-onnx)、
+mmBERT-base 322M の typed decision モデル)。文章を読んで human / bot を選ぶ。
 
-- **Laya** — [`mizchi/laya-multilingual-onnx`](https://huggingface.co/mizchi/laya-multilingual-onnx)
-  (mmBERT-base 322M の typed decision モデル)。文章を読んで human / bot を選ぶ。
-- **統計** — 投稿間隔の規則性、テンプレ率、返信率など、決定的に計算できる指標。
+投稿間隔の規則性やテンプレ率といった決定的な統計も計算しているが、
+**判定には使わない**。判定の横に並べて出すだけ。
 
 ## web デモ (`web/`)
 
@@ -23,16 +24,15 @@ Jev と同じ System One 系のオープンウェイトモデル [Laya](https://
 4. 投稿が 2 件たまった author から順に判定する
 5. 結果は observable 経由で随時描画される
 
-**Laya はデスクトップ専用**で、かつ任意。開いた直後は決定的な統計だけで動いていて、
-ダウンロードは 0 バイト。モデルを足したくなったら「Laya を読み込む」を押す。
+**Laya はデスクトップ専用**で、読み込むまで判定は出ない。
 WebKit (Safari、および iOS のすべてのブラウザ) では下記の理由で提供しない。**681 MB**
 (`model.onnx` 647 MB + `tokenizer.json` 34 MB) を Hugging Face から取る。
 推論は WebGPU、無ければ WASM にフォールバックする (かなり遅い)。
 
 **WebKit では読み込めない。** Safari は `InferenceSession.create` の中で
 タブごと落ちる。エラーにならず「問題が繰り返し起きました」の画面になるので、
-捕捉してリカバリする手段がない。該当端末では事前に警告を出す。
-統計のみの判定はどの端末でも動く。
+捕捉してリカバリする手段がない。該当端末では読み込みボタン自体を出さない
+(`?force=1` で試すことはできる)。
 
 原因はモデルの**バイト数**で、メモリ量でもグラフの構造でもない。
 ノード 1 個のモデルでサイズだけを変えて測った (Safari 26.6.1):
@@ -62,8 +62,8 @@ grow するのも通る。106 バイトのモデルは両バックエンドで�
 (`web/src/laya/download.ts`)。647 MB を 1 本のレスポンスで読み切る作りだと、
 313 MB 地点で切れたときに 0 バイトしか残らない。
 
-この作りにしたのは、統計だけで AUC 0.839 出るから (下の表)。
-681 MB 払う前に、何が起きるかは見えている方がいい。
+リレーの購読と kind:0 の収集はモデルなしで動くので、681 MB を払う前に
+何が起きるかは見えている。
 
 ```bash
 cd web
@@ -217,19 +217,21 @@ nostr には正解ラベルがある。kind:0 の NIP-24 `"bot": true` — ア�
 | **state = プロフィール + 投稿** | **0.819** |
 | criteria を1文の説明にする | **0.383** (偶然以下) |
 | criteria を短いラベル2語にする | **0.819** |
-| **統計のみ (Laya を使わない)** | **0.839** |
-| **Laya × 0.5 + 統計 × 0.5** | **0.907** |
+| 統計のみ (Laya を使わない) | 0.839 |
+| Laya × 0.5 + 統計 × 0.5 | 0.907 |
 
 読み取れること:
 
 1. **凝った criteria を書くと悪化する。** 1文の説明を入れた版は AUC 0.383 で、
    偶然より悪い。`"a human"` / `"an automated bot"` の2語が最も良かった。
-2. **決定的な統計だけで AUC 0.839。** Laya 単独 (0.819) より上。
-   投稿間隔の規則性とテンプレ率を数えるほうが、文章を読むより効く。
-3. **合成すると 0.907。** Laya が意味を持つのはここだけ。単独では算術に負ける。
+2. **決定的な統計だけで AUC 0.839 出た。** Laya 単独 (0.819) より上だった。
+   投稿間隔の規則性とテンプレ率を数えるほうが、文章を読むより効いていた。
+3. 合成すると 0.907 だった。
 
-だから UI は合成スコアだけでなく、Laya と統計を**別々に並べて**表示する。
-どちらが効いているかが見えるように。
+その上で、**統計による採点は廃止した。** 判定は Laya だけで行う。
+測った精度は落ちる。理由を説明できる採点器が 1 つある方が、
+食い違ったときに突き合わせが要る 2 つより扱いやすい、という判断で交換した。
+統計は計算を続けていて、判定の横に事実として並ぶ。
 
 ## 速度
 
@@ -270,7 +272,7 @@ pipeline/
   relaypool.py       WebSocket で REQ を投げて EOSE まで集める
   relays.py          kind:10002 -> kind:3 -> フォールバック の順で解決
   collect.py         kind:1 のページング収集、kind:0 と画像のキャッシュ
-  features.py        決定的な統計と、その素朴なスコア
+  features.py        表示用の決定的な統計 (採点には使わない)
   laya.py            ONNX 推論。プロンプト構築と較正を上流から移植
   detect.py          Laya に何をどう聞くか (上の表の結論)
   evaluate.py        NIP-24 ラベルに対する AUC / しきい値
@@ -278,7 +280,7 @@ pipeline/
 index.html main.js style.css   パイプラインの結果表示 (ビルド不要)
 web/                 ブラウザ版 nostr クライアント (TypeScript + Vite + React + rx-nostr)
   src/nostr/         リレー探索、kind:1 購読、kind:0 と画像のキャッシュ
-  src/detect/        統計と質問の設計 (pipeline/ の移植)
+  src/detect/        質問の設計と、表示用の統計 (pipeline/ の移植)
   src/laya/vendor/   @laya-mlx/web をそのまま vendor (npm 未公開のため)
   src/ui/            カードとメニュー
 .github/workflows/pages.yml   web/dist を GitHub Pages にデプロイ
