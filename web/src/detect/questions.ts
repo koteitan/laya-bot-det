@@ -26,8 +26,22 @@ const POST_LIMIT = 12;
 const POST_CHARS = 140;
 const PROFILE_CHARS = 200;
 
-/** Fitted on those 39 labelled accounts; no held-out set behind it. */
-export const BOT_THRESHOLD = 0.63;
+/** Fitted for the model's score alone, on 46 labelled accounts (30 bot, 16 human).
+ *
+ *  0.63 was fitted for the blend of model and statistics and does not survive
+ *  their removal: the model's own score sits high for almost everything, so
+ *  known humans average 0.751 against bots' 0.834, and cutting at 0.63 calls
+ *  62% of the humans bots. Only the very top of the range separates them:
+ *
+ *    threshold   recall   false positives   precision
+ *    0.63        0.77     0.62              0.70
+ *    0.95        0.60     0.31              0.78
+ *    0.99        0.50     0.12              0.88
+ *    0.995       0.50     0.06              0.94
+ *
+ *  0.99 is the trade taken: half the declared bots, and a human flagged about
+ *  one time in eight. Missing half of them is the price of not accusing people. */
+export const BOT_THRESHOLD = 0.99;
 
 const clean = (text: string, limit: number): string => {
   const s = (text || "").split(/\s+/).join(" ").trim();

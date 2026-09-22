@@ -45,12 +45,24 @@ POST_LIMIT = 12
 POST_CHARS = 140
 PROFILE_CHARS = 200
 
-# Measured on the 5,080-note snapshot. The earlier 0.40 maximised balanced
-# accuracy on a label set that runs 31 bots to 8 humans, which pulled it far
-# below anything a real population wants: it called 56% of authors bots, against
-# 13% at 0.63. The label set is not a sample of nostr, so its optimum is not the
-# population's optimum. The page exposes this as a slider for the same reason.
-BOT_THRESHOLD = 0.63
+# Fitted for the model's score alone, on 46 labelled accounts (30 bot, 16 human).
+#
+# 0.63 was fitted for the blend of model and statistics and does not survive
+# their removal: the model's own score sits high for almost everything, so known
+# humans average 0.751 against bots' 0.834, and cutting at 0.63 calls 62% of the
+# humans bots. Only the very top of the range separates them:
+#
+#   threshold   recall   false positives   precision
+#   0.63        0.77     0.62              0.70
+#   0.95        0.60     0.31              0.78
+#   0.99        0.50     0.12              0.88
+#   0.995       0.50     0.06              0.94
+#
+# 0.99 is the trade taken: half the declared bots, and a human flagged about one
+# time in eight. Missing half of them is the price of not accusing people. The
+# page exposes this as a slider, because where that line belongs is a policy
+# choice and not a measurement.
+BOT_THRESHOLD = 0.99
 
 WS_RE = re.compile(r"\s+")
 
