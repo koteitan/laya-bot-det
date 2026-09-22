@@ -23,7 +23,6 @@
         <select id="opt-sort">
           <option value="score">bot スコア順</option>
           <option value="laya">Laya スコア順</option>
-          <option value="heuristic">統計スコア順</option>
           <option value="posts">投稿数順</option>
         </select>
       </label>
@@ -33,7 +32,7 @@
           <option value="bot">bot 判定のみ</option>
           <option value="human">human 判定のみ</option>
           <option value="labelled">NIP-24 ラベル付きのみ</option>
-          <option value="disagree">Laya と統計が食い違うもの</option>
+          <option value="disagree">未判定のみ</option>
         </select>
       </label>
       <hr>
@@ -43,7 +42,7 @@
 </header>
 <main id="list"></main>
 <footer>
-  <p>判定は <code>mizchi/laya-multilingual-onnx</code>（Laya, mmBERT-base 322M）と決定的な投稿統計の合成。
+  <p>判定は <code>mizchi/laya-multilingual-onnx</code>（Laya, mmBERT-base 322M）のみ。
      スコアは較正されていません — 順位は意味を持ちますが、絶対値は持ちません。</p>
 </footer>
 <script src="main.js"></script>

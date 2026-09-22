@@ -60,10 +60,12 @@ function card(a) {
   const p = a.profile || {};
   const laya = a.laya || {};
   const name = p.display_name || p.name || a.npub.slice(0, 16) + '…';
-  const verdict = a.score >= state.threshold ? 'bot' : 'human';
+  // Unjudged authors have no score at all now that the statistics no longer
+  // stand in for the model.
+  const judged = typeof a.score === 'number';
+  const verdict = !judged ? 'unjudged' : a.score >= state.threshold ? 'bot' : 'human';
   const label = typeof p.bot === 'boolean'
     ? `<span class="badge label-${p.bot ? 'bot' : 'human'}">NIP-24: bot=${p.bot}</span>` : '';
-  const reasons = (a.heuristic?.reasons || []).map((r) => `<li>${esc(r)}</li>`).join('');
   const f = a.features || {};
   const posts = state.posts
     ? `<div class="posts">${(a.sample || []).slice(0, 3)
@@ -78,14 +80,12 @@ function card(a) {
         ${p.about ? `<div class="about">${esc(p.about)}</div>` : ''}
       </div>
       <div class="verdict">
-        <div class="tag">${verdict.toUpperCase()}</div>
-        <div class="score">${a.score.toFixed(2)}</div>
+        <div class="tag">${judged ? verdict.toUpperCase() : '未判定'}</div>
+        <div class="score">${judged ? a.score.toFixed(2) : ''}</div>
       </div>
     </div>
     <div class="bars">
-      ${bar('合成', a.score, false)}
-      ${bar('Laya', laya.p_bot, true)}
-      ${bar('統計', a.heuristic?.score, false)}
+      ${bar('bot スコア', a.score, false)}
     </div>
     <div class="meta">
       ${label}
@@ -97,7 +97,6 @@ function card(a) {
       ${laya.order_spread > 0.15
         ? `<span title="選択肢の順番で答えが変わった量">順序差 ${laya.order_spread.toFixed(2)}</span>` : ''}
     </div>
-    ${reasons ? `<ul class="reasons">${reasons}</ul>` : ''}
     ${posts}
   </article>`;
 }
@@ -117,12 +116,11 @@ function render() {
   else if (state.filter === 'labelled')
     rows = rows.filter((a) => typeof a.profile?.bot === 'boolean');
   else if (state.filter === 'disagree')
-    rows = rows.filter((a) => Math.abs((a.laya?.p_bot ?? 0) - (a.heuristic?.score ?? 0)) >= 0.4);
+    rows = rows.filter((a) => a.score === null || a.score === undefined);
 
   const keyed = {
-    score: (a) => a.score,
+    score: (a) => (typeof a.score === 'number' ? a.score : -1),
     laya: (a) => a.laya?.p_bot ?? -1,
-    heuristic: (a) => a.heuristic?.score ?? -1,
     posts: (a) => a.features?.posts ?? -1,
   }[state.sort];
   rows.sort((x, y) => keyed(y) - keyed(x));

@@ -15,8 +15,8 @@ import {
   putProfile,
 } from "./nostr/cache.ts";
 import { decodeNpub, encodeNpub } from "./nostr/nip19.ts";
-import { features, heuristicScore, type Note } from "./detect/features.ts";
-import { buildState, combinedScore, QUESTIONS } from "./detect/questions.ts";
+import { features, type Note } from "./detect/features.ts";
+import { buildState, QUESTIONS } from "./detect/questions.ts";
 import { memoryWarning } from "./laya/capability.ts";
 import { clearTrace, crashed, format, mark, trace } from "./laya/trace.ts";
 import { ortVersion, selfTest, type SelfTestResult } from "./laya/selftest.ts";
@@ -124,17 +124,16 @@ export function App() {
       for (const [pubkey, notes] of notesRef.current) {
         total += notes.length;
         if (notes.length < MIN_POSTS) continue;
-        const f = features(notes);
-        const h = heuristicScore(f);
         const judged = judgedRef.current.get(pubkey);
         rows.push({
           pubkey,
           npub: encodeNpub(pubkey),
           profile: getProfile(pubkey),
-          features: f,
-          heuristic: h,
+          features: features(notes),
           laya: judged?.verdict ?? null,
-          score: combinedScore(judged?.verdict.pBot ?? null, h.score),
+          // No model verdict means no verdict. The statistics used to stand in
+          // here; they are description now, not a score.
+          score: judged?.verdict.pBot ?? null,
           lastSeen: notes[0]?.created_at ?? 0,
         });
       }
@@ -280,23 +279,21 @@ export function App() {
   const shown = useMemo(() => {
     const t = settings.threshold;
     let rows = authors;
-    if (settings.filter === "bot") rows = rows.filter((a) => a.score >= t);
-    else if (settings.filter === "human") rows = rows.filter((a) => a.score < t);
+    if (settings.filter === "bot") rows = rows.filter((a) => a.score !== null && a.score >= t);
+    else if (settings.filter === "human") rows = rows.filter((a) => a.score !== null && a.score < t);
     else if (settings.filter === "labelled")
       rows = rows.filter((a) => typeof a.profile?.bot === "boolean");
-    else if (settings.filter === "disagree")
-      rows = rows.filter((a) => a.laya && Math.abs(a.laya.pBot - a.heuristic.score) >= 0.4);
+    else if (settings.filter === "unjudged") rows = rows.filter((a) => a.score === null);
     const key: Record<Settings["sort"], (a: Author) => number> = {
-      score: (a) => a.score,
-      laya: (a) => a.laya?.pBot ?? -1,
-      heuristic: (a) => a.heuristic.score,
+      // Unjudged sorts last rather than as zero, which would read as "human".
+      score: (a) => a.score ?? -1,
       posts: (a) => a.features.posts,
       recent: (a) => a.lastSeen,
     };
     return [...rows].sort((x, y) => key[settings.sort](y) - key[settings.sort](x));
   }, [authors, settings.threshold, settings.filter, settings.sort]);
 
-  const bots = authors.filter((a) => a.score >= settings.threshold).length;
+  const bots = authors.filter((a) => a.score !== null && a.score >= settings.threshold).length;
 
   return (
     <>
@@ -383,8 +380,8 @@ export function App() {
       </main>
       <footer>
         <p>
-          判定は Laya (mmBERT-base 322M, WebGPU) と決定的な投稿統計の合成。
-          スコアは較正されていないので、順位には意味があるが絶対値にはない。
+          判定は Laya (mmBERT-base 322M, WebGPU) のみ。スコアは較正されていないので、
+          順位には意味があるが絶対値にはない。
           {" "}
           <a href="https://github.com/koteitan/laya-bot-det">ソース</a>
         </p>
@@ -429,7 +426,7 @@ function LayaStatus({
           <span className={warning.fatal ? "warn fatal" : "warn"}>{warning.text}</span>
         ) : null}
         {usingCustomModel() ? <span className="warn">モデル: {MODEL_URL}</span> : null}
-        いまは<b>統計のみ</b>で判定中。
+        <b>Laya が未読み込みです。</b>読み込むまで判定は出ません。
         {withheld ? (
           <>
             この端末では Laya を提供しません。デスクトップの Chrome か Edge で開くと使えます。{" "}

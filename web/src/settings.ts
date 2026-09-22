@@ -3,8 +3,8 @@ import { BOT_THRESHOLD } from "./detect/questions.ts";
 export interface Settings {
   dark: boolean;
   threshold: number;
-  sort: "score" | "laya" | "heuristic" | "posts" | "recent";
-  filter: "all" | "bot" | "human" | "labelled" | "disagree";
+  sort: "score" | "posts" | "recent";
+  filter: "all" | "bot" | "human" | "labelled" | "unjudged";
   seed: boolean;
 }
 

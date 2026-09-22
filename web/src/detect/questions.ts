@@ -26,8 +26,7 @@ const POST_LIMIT = 12;
 const POST_CHARS = 140;
 const PROFILE_CHARS = 200;
 
-/** Fitted on those 39 labelled accounts; no held-out set behind them. */
-export const LAYA_WEIGHT = 0.5;
+/** Fitted on those 39 labelled accounts; no held-out set behind it. */
 export const BOT_THRESHOLD = 0.63;
 
 const clean = (text: string, limit: number): string => {
@@ -74,6 +73,11 @@ export const QUESTIONS: Record<string, Question> = {
   // answer for individual accounts, so both are asked and averaged.
   bot_hb: { type: "choice", instructions: WHOSE, criteria: { human: HUMAN, bot: BOT } },
   bot_bh: { type: "choice", instructions: WHOSE, criteria: { bot: BOT, human: HUMAN } },
+  // "spam" was one of these and is not any more. A choice question always
+  // returns one of its options, so an account that fits none of them still gets
+  // the nearest label -- and this one landed on accounts scoring 0.003, as
+  // human as the model gets. Calling a person a spammer on a guess is a harm
+  // the other labels do not carry; being wrong about "news" versus "data" is not.
   category: {
     type: "choice",
     instructions: "What kind of account is this?",
@@ -82,7 +86,6 @@ export const QUESTIONS: Record<string, Question> = {
       news: "an automated feed of news headlines or article links",
       data: "automated numeric updates such as prices, weather or alerts",
       bridge: "a mirror relaying posts from another platform",
-      spam: "repetitive advertising or scam messages",
       art: "an account that only posts images or media",
     },
   },
@@ -105,6 +108,3 @@ export const QUESTIONS: Record<string, Question> = {
   },
 };
 
-/** 0.5 * model + 0.5 * statistics. Alone they score 0.819 and 0.839; together 0.907. */
-export const combinedScore = (pBot: number | null, heuristic: number): number =>
-  pBot === null ? heuristic : LAYA_WEIGHT * pBot + (1 - LAYA_WEIGHT) * heuristic;

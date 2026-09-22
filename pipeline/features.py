@@ -1,10 +1,13 @@
 """Deterministic posting-behaviour statistics.
 
-These are kept out of the text handed to Laya on purpose. A planner that writes
-"posts on a fixed 10-minute schedule" into the option text has already made the
-decision, and the model would only be reading the answer back. Here the
-statistics are computed, reported and scored separately, so the UI can show what
-the arithmetic says and what the model says side by side, and they can disagree.
+These used to carry a score of their own, weighted half and half with the
+model's. That is gone: the judgement is the model's alone. What is left is
+description -- how many posts, how evenly spaced, how often a reply -- reported
+beside the verdict as context for it, never folded into it.
+
+They are still kept out of the text handed to Laya, for the reason they always
+were: a description that already says "posts on a fixed 10-minute schedule" has
+made the decision, and the model would only be reading the answer back.
 """
 
 import re
@@ -62,40 +65,3 @@ def author_features(events: list[dict]) -> dict:
         "first_seen": times[0] if times else None,
         "last_seen": times[-1] if times else None,
     }
-
-
-def heuristic_score(f: dict) -> dict:
-    """A transparent 0..1 bot score from the statistics alone, with its reasons.
-
-    Deliberately simple and auditable: it exists as a control for the model, not
-    as a tuned classifier. Weights are asserted, not fitted -- with no labelled
-    nostr data there is nothing here to fit them on.
-    """
-    reasons = []
-    score = 0.0
-    if f["posts"] >= 3:
-        if f["template_share"] >= 0.6:
-            score += 0.35
-            reasons.append(f"{int(f['template_share'] * 100)}% of posts share one template")
-        elif f["template_share"] >= 0.3:
-            score += 0.15
-            reasons.append(f"{int(f['template_share'] * 100)}% of posts share one template")
-        if f["distinct_ratio"] <= 0.5:
-            score += 0.2
-            reasons.append(f"only {int(f['distinct_ratio'] * 100)}% of posts are distinct")
-    if f["regularity"] is not None and f["regularity"] >= 0.8 and f["posts"] >= 4:
-        score += 0.25
-        reasons.append(f"posts on a near-fixed interval (regularity {f['regularity']:.2f})")
-    if f["url_ratio"] >= 0.9 and f["posts"] >= 3:
-        score += 0.1
-        reasons.append("almost every post carries a link")
-    if f["reply_ratio"] <= 0.05 and f["posts"] >= 5:
-        score += 0.1
-        reasons.append("never replies to anyone")
-    elif f["reply_ratio"] >= 0.5:
-        score -= 0.15
-        reasons.append(f"replies to others in {int(f['reply_ratio'] * 100)}% of posts")
-    if f["posts"] >= 4 and f["length_stdev"] <= 3 and f["mean_length"] > 0:
-        score += 0.1
-        reasons.append("post length barely varies")
-    return {"score": round(min(max(score, 0.0), 1.0), 4), "reasons": reasons}

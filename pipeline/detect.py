@@ -20,11 +20,14 @@ AUC against those labels:
     option order    changes the answer per account, so both orders are asked
                     and averaged
 
-Two results are worth keeping in view. Elaborate criteria made the model *worse
-than chance*; short labels won. And the deterministic statistics in
-`features.py` scored 0.839 on their own -- better than the model. The model
-earns its place only in combination: 0.5 * laya + 0.5 * heuristic reaches 0.907,
-which is why `run.py` reports all three numbers rather than one.
+Elaborate criteria made the model *worse than chance* here; short labels won.
+
+The deterministic statistics in `features.py` used to carry half the weight of
+the verdict, and scored 0.839 alone against the model's 0.819, with the blend
+reaching 0.907. They no longer score anything: the judgement is the model's,
+and the statistics are description shown beside it. That costs accuracy on the
+labelled set, and was chosen anyway -- one scorer that can be reasoned about
+beats two that have to be reconciled.
 
 Sample-size warning: 39 labelled accounts, 8 of them negative, and the blend
 weight and thresholds were chosen on that same set with nothing held out. The
@@ -41,9 +44,6 @@ import re
 POST_LIMIT = 12
 POST_CHARS = 140
 PROFILE_CHARS = 200
-
-# Fitted on the 39 labelled accounts described above; no held-out set behind it.
-LAYA_WEIGHT = 0.5
 
 # Measured on the 5,080-note snapshot. The earlier 0.40 maximised balanced
 # accuracy on a label set that runs 31 bots to 8 humans, which pulled it far
@@ -115,13 +115,17 @@ QUESTIONS = {
                "criteria": {"human": HUMAN, "bot": BOT}},
     "bot_bh": {"type": "choice", "instructions": WHOSE,
                "criteria": {"bot": BOT, "human": HUMAN}},
+    # "spam" was one of these and is not any more. A choice question always
+    # returns one of its options, so an account fitting none of them still gets
+    # the nearest label -- and this one landed on accounts scoring 0.003, as
+    # human as the model gets. Calling a person a spammer on a guess is a harm
+    # the other labels do not carry; being wrong about "news" versus "data" is not.
     "category": {"type": "choice", "instructions": "What kind of account is this?",
                  "criteria": {
                      "person": "a person talking about their own life",
                      "news": "an automated feed of news headlines or article links",
                      "data": "automated numeric updates such as prices, weather or alerts",
                      "bridge": "a mirror relaying posts from another platform",
-                     "spam": "repetitive advertising or scam messages",
                      "art": "an account that only posts images or media",
                  }},
     "templated": {"type": "noul",
@@ -154,10 +158,3 @@ def judge(laya, events: list[dict], profile: dict | None = None) -> dict:
         "conversational": ans["conversational"]["noul"],
         "input_tokens": result["usage"]["input_tokens"],
     }
-
-
-def combined_score(p_bot: float | None, heuristic: float) -> float:
-    """0.5 * model + 0.5 * statistics. Alone they score 0.819 and 0.839; together 0.907."""
-    if p_bot is None:
-        return round(heuristic, 4)
-    return round(LAYA_WEIGHT * p_bot + (1 - LAYA_WEIGHT) * heuristic, 4)

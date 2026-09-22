@@ -9,8 +9,8 @@ measurable against the handful of accounts that explicitly set `"bot": false`.
 
 import logging
 
-from .detect import BOT_THRESHOLD, combined_score, judge
-from .features import author_features, heuristic_score
+from .detect import BOT_THRESHOLD, judge
+
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +49,6 @@ def evaluate(laya, authors: dict[str, list[dict]], profiles: dict, min_posts: in
 
     rows = []
     for n, (pk, evs, profile) in enumerate(labelled, 1):
-        feats = author_features(evs)
         try:
             verdict = judge(laya, evs, profile)
         except Exception as exc:
@@ -63,8 +62,6 @@ def evaluate(laya, authors: dict[str, list[dict]], profiles: dict, min_posts: in
             "name": profile.get("name") or "",
             "posts": len(evs),
             "p_bot": verdict["p_bot"],
-            "heuristic": heuristic_score(feats)["score"],
-            "combined": combined_score(verdict["p_bot"], heuristic_score(feats)["score"]),
             "category": verdict["category"],
             "templated": verdict["templated"],
         })
@@ -74,7 +71,7 @@ def evaluate(laya, authors: dict[str, list[dict]], profiles: dict, min_posts: in
     pos = [r for r in rows if r["label"]]
     neg = [r for r in rows if not r["label"]]
     report = {"n_bot": len(pos), "n_human": len(neg), "rows": rows, "scorers": {}}
-    for key in ("combined", "p_bot", "heuristic"):
+    for key in ("p_bot",):
         p = [r[key] for r in pos if r.get(key) is not None]
         q = [r[key] for r in neg if r.get(key) is not None]
         if not p or not q:

@@ -41,8 +41,6 @@ export function Menu({ open, onToggle, settings, onChange, onClearCache, cachedP
           並び順
           <select value={settings.sort} onChange={(e) => onChange({ sort: e.target.value as Settings["sort"] })}>
             <option value="score">bot スコア順</option>
-            <option value="laya">Laya スコア順</option>
-            <option value="heuristic">統計スコア順</option>
             <option value="posts">投稿数順</option>
             <option value="recent">新着順</option>
           </select>
@@ -54,7 +52,7 @@ export function Menu({ open, onToggle, settings, onChange, onClearCache, cachedP
             <option value="bot">bot 判定のみ</option>
             <option value="human">human 判定のみ</option>
             <option value="labelled">NIP-24 ラベル付きのみ</option>
-            <option value="disagree">Laya と統計が食い違うもの</option>
+            <option value="unjudged">未判定のみ</option>
           </select>
         </label>
         <hr />

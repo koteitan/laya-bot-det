@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { cachePicture, type Profile } from "../nostr/cache.ts";
-import type { Features, Heuristic } from "../detect/features.ts";
+import type { Features } from "../detect/features.ts";
 
 export interface LayaVerdict {
   pBot: number;
@@ -15,9 +15,9 @@ export interface Author {
   npub: string;
   profile: Profile | undefined;
   features: Features;
-  heuristic: Heuristic;
   laya: LayaVerdict | null;
-  score: number;
+  /** null until the model has judged this author. */
+  score: number | null;
   lastSeen: number;
 }
 
@@ -51,7 +51,7 @@ function Avatar({ profile }: { profile: Profile | undefined }) {
 const n2 = (v: number | null | undefined): string => (v == null ? "—" : v.toFixed(2));
 
 export function AuthorCard({ a, threshold }: { a: Author; threshold: number }) {
-  const verdict = a.score >= threshold ? "bot" : "human";
+  const verdict = a.score === null ? "unjudged" : a.score >= threshold ? "bot" : "human";
   const name = a.profile?.display_name || a.profile?.name || a.npub.slice(0, 16) + "…";
   const f = a.features;
   return (
@@ -63,8 +63,8 @@ export function AuthorCard({ a, threshold }: { a: Author; threshold: number }) {
               was separated from the avatar and name by the full card width. */}
           <div className="headline">
             <span className="name">{name}</span>
-            <span className="tag">{verdict.toUpperCase()}</span>
-            <span className="score">{a.score.toFixed(2)}</span>
+            <span className="tag">{a.score === null ? "未判定" : verdict.toUpperCase()}</span>
+            {a.score !== null ? <span className="score">{a.score.toFixed(2)}</span> : null}
           </div>
           <div className="npub">
             <a href={`https://nostx.io/${a.npub}`} target="_blank" rel="noreferrer">
@@ -73,10 +73,6 @@ export function AuthorCard({ a, threshold }: { a: Author; threshold: number }) {
           </div>
           {a.profile?.about ? <div className="about">{a.profile.about}</div> : null}
         </div>
-      </div>
-      <div className="scores">
-        合成 <b>{n2(a.score)}</b> ・ Laya <b>{n2(a.laya?.pBot)}</b> ・ 統計{" "}
-        <b>{n2(a.heuristic.score)}</b>
       </div>
       <div className="meta">
         {typeof a.profile?.bot === "boolean" ? (
@@ -89,15 +85,11 @@ export function AuthorCard({ a, threshold }: { a: Author; threshold: number }) {
         {a.laya ? <span>定型 {n2(a.laya.templated)}</span> : null}
         {a.laya ? <span>会話 {n2(a.laya.conversational)}</span> : null}
         {f.regularity !== null ? <span>間隔の規則性 {n2(f.regularity)}</span> : null}
+        <span>返信 {Math.round(f.replyRatio * 100)}%</span>
         {a.laya && a.laya.orderSpread > 0.15 ? (
           <span title="選択肢の順番で答えが変わった量">順序差 {n2(a.laya.orderSpread)}</span>
         ) : null}
       </div>
-      {a.heuristic.reasons.length ? (
-        <ul className="reasons">
-          {a.heuristic.reasons.map((r) => <li key={r}>{r}</li>)}
-        </ul>
-      ) : null}
     </article>
   );
 }

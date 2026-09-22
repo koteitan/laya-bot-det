@@ -14,9 +14,9 @@ from pathlib import Path
 
 from . import __version__
 from .collect import collect_notes, collect_profiles, group_by_author, load_cache
-from .detect import BOT_THRESHOLD, combined_score, judge
+from .detect import BOT_THRESHOLD, judge
 from .evaluate import evaluate
-from .features import author_features, heuristic_score
+from .features import author_features
 from .nip19 import decode_npub, encode_npub
 from .notecache import NoteCache
 from .relays import discover
@@ -119,20 +119,22 @@ def cmd_detect(args) -> None:
         evs = targets[pk]
         profile = profiles.get(pk) or {}
         feats = author_features(evs)
-        heur = heuristic_score(feats)
         try:
             verdict = judge(laya, evs, profile)
         except Exception as exc:
             log.warning("%s: %s", pk[:8], exc)
             verdict = {"error": str(exc)}
-        score = combined_score(verdict.get("p_bot"), heur["score"])
+        # No model verdict means no verdict. The statistics used to stand in
+        # here; they are description now, not a score.
+        score = verdict.get("p_bot")
         rows.append({
             "pubkey": pk, "npub": encode_npub(pk),
-            "score": score, "verdict": "bot" if score >= BOT_THRESHOLD else "human",
+            "score": score,
+            "verdict": None if score is None else ("bot" if score >= BOT_THRESHOLD else "human"),
             "profile": {k: profile.get(k) for k in
                         ("bot", "name", "display_name", "about", "nip05",
                          "picture_url", "picture_local", "found")},
-            "features": feats, "heuristic": heur, "laya": verdict,
+            "features": feats, "laya": verdict,
             "sample": [(e.get("content") or "")[:200] for e in evs[:5]],
         })
         if n % 20 == 0 or n == len(order):
@@ -141,7 +143,7 @@ def cmd_detect(args) -> None:
 
     ok = [r for r in rows if "p_bot" in r["laya"]]
     bots = [r for r in rows if r["verdict"] == "bot"]
-    rows.sort(key=lambda r: r["score"], reverse=True)
+    rows.sort(key=lambda r: (r["score"] is None, -(r["score"] or 0)))
     _write(AUTHORS_JSON, {
         "version": __version__,
         "generated_at": int(time.time()),
