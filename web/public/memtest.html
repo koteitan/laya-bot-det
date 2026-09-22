@@ -50,27 +50,6 @@ Laya (int8) を動かすには <b>約 800 MB</b>、fp16 なら <b>約 1.3 GB</b>
 </div>
 
 <div class="box">
-  <div class="dim">
-    大きいが構造は単純なモデルを読ませる<br>
-    ノード 1 個。Laya は数千ノードあるので、サイズだけを変数にできる。
-  </div>
-  <p id="sizebtns">
-    <button data-size="32">34 MB</button>
-    <button data-size="64">67 MB</button>
-    <button data-size="128">134 MB</button>
-    <button data-size="192">201 MB</button>
-    <button data-size="256">268 MB</button>
-    <button data-size="325">341 MB</button>
-  </p>
-  <div class="dim" style="font-size:12px">
-    小さい方から順に押してください。落ちたサイズが上限です。<br>
-    到達したサイズは記録されるので、落ちても開き直せば分かります。
-  </div>
-  <div class="dim" id="sizebest"></div>
-  <div id="sizelog" class="dim"></div>
-</div>
-
-<div class="box">
   <div class="dim">連続した 1 本を確保できるか（ここが本番の条件）</div>
   <p>
     <button id="contig">ArrayBuffer 1本</button>
@@ -152,81 +131,10 @@ document.getElementById("run").onclick = function () {
 
 show();
 
-// ---- サイズだけを変えたモデル ----
-// opt=disabled でも 325MB の Laya は落ちた。残る容疑は「バイト数」と
-// 「グラフの複雑さ」。ノード 1 個で 341MB のモデルが通れば、前者ではない。
-var SIZE_BASE = "https://koteitan.github.io/laya-int8/sizetest/";
-var sizeLog = document.getElementById("sizelog");
-
-async function fetchModel(name, log) {
-  var manifest = null;
-  try {
-    var r = await fetch(SIZE_BASE + name + ".parts.json");
-    if (r.ok) manifest = await r.json();
-  } catch (e) { /* 分割されていない */ }
-  if (!manifest) {
-    var res = await fetch(SIZE_BASE + name);
-    if (!res.ok) throw new Error(name + ": HTTP " + res.status);
-    return await res.arrayBuffer();
-  }
-  log(manifest.parts.length + " 分割を取得します");
-  var bytes = new Uint8Array(manifest.size), at = 0;
-  for (var i = 0; i < manifest.parts.length; i++) {
-    var part = manifest.parts[i];
-    var b = await (await fetch(SIZE_BASE + part.name)).arrayBuffer();
-    bytes.set(new Uint8Array(b), at); at += b.byteLength;
-    log("  " + part.name + " " + Math.round(at / 1e6) + " MB");
-  }
-  return bytes.buffer;
-}
-
-async function trySize(name, label, mb) {
-  sizeLog.textContent = "";
-  function log(s) { sizeLog.textContent += s + "\n"; }
-  try {
-    log(label + " を読み込みます");
-    var ort = await import(ORT_URL);
-    ort.env.wasm.wasmPaths = location.origin + location.pathname.replace(/[^/]*$/, "") + "ort/";
-    ort.env.wasm.numThreads = 1;
-    var buf = await fetchModel(name, log);
-    log("取得 " + Math.round(buf.byteLength / 1e6) + " MB。create を開始…");
-    var t = Date.now();
-    var sess = await ort.InferenceSession.create(buf, { executionProviders: ["wasm"] });
-    log("create OK (" + ((Date.now() - t) / 1000).toFixed(1) + " 秒)");
-    var out = await sess.run({ X: new ort.Tensor("float32", new Float32Array(64).fill(1), [1, 64]) });
-    log("推論 OK (出力 " + out.Y.dims.join("x") + ")");
-    log("→ このサイズなら通る");
-    if (mb && mb > sizeBest()) {
-      try { localStorage.setItem(SIZE_KEY, String(mb)); } catch (e) {}
-      showSizeBest();
-    }
-  } catch (e) {
-    log("失敗: " + (e && e.name) + " " + (e && e.message));
-  }
-}
-// memtest と同じ手: 通ったサイズを localStorage に残す。タブが死んでも残るので、
-// 開き直せば「どこまで通ったか」が読める。
-var SIZE_KEY = "laya-memtest-model-mb";
-function sizeBest() {
-  try { return Number(localStorage.getItem(SIZE_KEY)) || 0; } catch (e) { return 0; }
-}
-function showSizeBest() {
-  var b = sizeBest();
-  document.getElementById("sizebest").textContent =
-    b ? "これまでに create まで通った最大: " + b + " MB" : "";
-}
-var btns = document.getElementById("sizebtns").getElementsByTagName("button");
-for (var i = 0; i < btns.length; i++) {
-  (function (b) {
-    b.onclick = async function () {
-      for (var j = 0; j < btns.length; j++) btns[j].disabled = true;
-      var mb = Number(b.getAttribute("data-size"));
-      await trySize("size" + mb + ".onnx", b.textContent, mb);
-      for (var j = 0; j < btns.length; j++) btns[j].disabled = false;
-    };
-  })(btns[i]);
-}
-showSizeBest();
+// サイズだけを変えたモデルでの測定はここにあったが、配布していたリポジトリごと
+// 削除した。結果は README と src/laya/capability.ts に数字で残してある:
+// 34 MB と 134 MB は通り、201 MB は通ったり落ちたりし、325 MB 以上は必ず落ちる。
+// 同じサイズならノード 1 個でも Laya の数千ノードでも同じだった。
 
 // ---- onnxruntime の初期化 ----
 // 本番は 647MB のモデルの create() で落ちるが、メモリは 2.5GB まで取れている。

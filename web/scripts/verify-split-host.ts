@@ -5,7 +5,7 @@
  *  also reports whether the host honours Range, because GitHub Pages does not,
  *  and a loader that assumes it would fetch the whole file per 8 MB chunk.
  *
- *   npx tsx scripts/verify-split-host.ts https://koteitan.github.io/laya-int8/
+ *   npx tsx scripts/verify-split-host.ts https://example.com/bundle/
  */
 import { createHash } from "node:crypto";
 

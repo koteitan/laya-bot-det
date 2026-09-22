@@ -399,7 +399,14 @@ function LayaStatus({
   onClear: () => void;
 }) {
   const warning = memoryWarning();
+  const forced = new URLSearchParams(location.search).has("force");
   if (state.kind === "idle") {
+    // Loading the model on WebKit kills the tab, and does so unpredictably --
+    // 201 MB sometimes works, sometimes does not. A button that occasionally
+    // takes the browser with it is not worth offering, so it is withheld here
+    // rather than dressed up as a choice. `?force=1` still gets it, which is
+    // how this will be re-measured when onnxruntime or WebKit change.
+    const withheld = warning?.fatal === true && !forced && !usingCustomModel();
     return (
       <p className="laya-status">
         {/* The warning is a measurement of the default bundle. Pointing at
@@ -410,19 +417,29 @@ function LayaStatus({
         ) : null}
         {usingCustomModel() ? <span className="warn">モデル: {MODEL_URL}</span> : null}
         いまは<b>統計のみ</b>で判定中。
-        {state.cached >= state.total
-          ? "Laya はキャッシュ済みなので、ダウンロードなしで使えます。"
-          : state.cached > 0
-            ? `Laya は ${MB(state.cached)} / ${MB(state.total)} MB までキャッシュ済み。続きから再開します。`
-            : `Laya を足すには ${MB(state.total)} MB のダウンロードが要ります（初回だけ）。`}{" "}
-        <button onClick={onStart}>
-          {warning?.fatal ? "それでも Laya を読み込む" : "Laya を読み込む"}
-        </button>
-        {state.cached > 0 ? <button onClick={onClear}>キャッシュを消す</button> : null}
-        {!hasWebGPU() ? " ※ WebGPU が無いので WASM で動きます（かなり遅い）" : null}
+        {withheld ? (
+          <>
+            この端末では Laya を提供しません。デスクトップの Chrome か Edge で開くと使えます。{" "}
+            <a href="?force=1">それでも試す</a>
+          </>
+        ) : (
+          <>
+            {state.cached >= state.total
+              ? "Laya はキャッシュ済みなので、ダウンロードなしで使えます。"
+              : state.cached > 0
+                ? `Laya は ${MB(state.cached)} / ${MB(state.total)} MB までキャッシュ済み。続きから再開します。`
+                : `Laya を足すには ${MB(state.total)} MB のダウンロードが要ります（初回だけ）。`}{" "}
+            <button onClick={onStart}>
+              {warning?.fatal ? "それでも Laya を読み込む" : "Laya を読み込む"}
+            </button>
+            {state.cached > 0 ? <button onClick={onClear}>キャッシュを消す</button> : null}
+            {!hasWebGPU() ? " ※ WebGPU が無いので WASM で動きます（かなり遅い）" : null}
+          </>
+        )}
       </p>
     );
   }
+
   if (state.kind === "loading") {
     const pct = state.total ? Math.min(100, (state.received / state.total) * 100) : 0;
     return (
